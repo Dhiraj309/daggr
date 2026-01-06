@@ -18,11 +18,48 @@ uv pip install daggr
 
 ## Usage
 
-```python
-import daggr
+daggr allows you to build complex pipelines by connecting Gradio apps together.
 
-# Your code here
+### Basic Example
+
+```python
+from daggr import Workflow, GradioNode
+
+# Create a workflow
+workflow = Workflow(name="My Pipeline")
+
+# Add Gradio app nodes (using Space IDs or URLs)
+node1 = GradioNode(src="username/space-name", name="First App")
+node2 = GradioNode(src="username/another-space", name="Second App")
+
+# Add nodes to workflow
+workflow.add_node(node1)
+workflow.add_node(node2)
+
+# Connect nodes (explicit output-to-input mapping)
+workflow.connect(
+    source=node1,
+    source_output="0",  # First output of node1
+    target=node2,
+    target_input="text"  # Input parameter name of node2
+)
+
+# Mark interaction points where users can provide input
+workflow.mark_interaction(node1)
+
+# Launch the generated UI
+workflow.launch()
 ```
+
+### Test App
+
+Run the included test app:
+
+```bash
+python test_app.py
+```
+
+This creates a simple pipeline connecting a text generator to a text summarizer.
 
 ## Development
 
