@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import gradio as gr
@@ -1407,7 +1406,7 @@ class UIGenerator:
         }
 
     def _execute_workflow(self, canvas_data: dict) -> dict:
-        from daggr.node import InputNode, InteractionNode, MapNode
+        from daggr.node import InputNode, InteractionNode
 
         self.session_id = canvas_data.get("session_id") if canvas_data else None
         if not self.session_id:
@@ -1652,7 +1651,7 @@ class UIGenerator:
         return list(ancestors)
 
     def _execute_to_node(self, canvas_data: dict, target_node: str) -> dict:
-        from daggr.node import InputNode, InteractionNode
+        from daggr.node import InputNode
 
         self.session_id = canvas_data.get("session_id") if canvas_data else None
         if not self.session_id:

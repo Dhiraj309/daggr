@@ -130,8 +130,6 @@ class SequentialExecutor:
             raise RuntimeError(f"Error executing node '{node_name}': {e}")
 
     def _execute_map_node(self, node, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        from daggr.node import MapNode
-
         items = inputs.get("items", [])
         if not isinstance(items, list):
             items = [items]
