@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from daggr.graph import Graph
@@ -11,6 +11,7 @@ class SequentialExecutor:
         self.graph = graph
         self.clients: Dict[str, Any] = {}
         self.results: Dict[str, Any] = {}
+        self.map_results: Dict[str, List[Any]] = {}
 
     def _get_client(self, node_name: str):
         from daggr.node import GradioNode
@@ -56,7 +57,14 @@ class SequentialExecutor:
     def execute_node(
         self, node_name: str, user_inputs: Optional[Dict[str, Any]] = None
     ) -> Any:
-        from daggr.node import FnNode, GradioNode, InferenceNode, InteractionNode
+        from daggr.node import (
+            FnNode,
+            GradioNode,
+            InferenceNode,
+            InputNode,
+            InteractionNode,
+            MapNode,
+        )
 
         node = self.graph.nodes[node_name]
         inputs = self._prepare_inputs(node_name)
@@ -71,7 +79,15 @@ class SequentialExecutor:
                     inputs["input"] = user_inputs
 
         try:
-            if isinstance(node, GradioNode):
+            if isinstance(node, InputNode):
+                result = {}
+                for port in node._output_ports:
+                    result[port] = inputs.get(port, "")
+
+            elif isinstance(node, MapNode):
+                result = self._execute_map_node(node, inputs)
+
+            elif isinstance(node, GradioNode):
                 client = self._get_client(node_name)
                 if client:
                     if inputs:
@@ -112,6 +128,57 @@ class SequentialExecutor:
 
         except Exception as e:
             raise RuntimeError(f"Error executing node '{node_name}': {e}")
+
+    def _execute_map_node(self, node, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from daggr.node import MapNode
+
+        items = inputs.get("items", [])
+        if not isinstance(items, list):
+            items = [items]
+
+        context_inputs = {k: v for k, v in inputs.items() if k != "items"}
+        results = []
+
+        for item in items:
+            fn_kwargs = {node._item_param: item}
+            fn_kwargs.update(context_inputs)
+            item_result = node.fn(**fn_kwargs)
+            results.append(item_result)
+
+        self.map_results[node.name] = results
+        return {"results": results}
+
+    def execute_map_item(
+        self, node_name: str, item_index: int, inputs: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        from daggr.node import MapNode
+
+        node = self.graph.nodes[node_name]
+        if not isinstance(node, MapNode):
+            raise ValueError(f"Node '{node_name}' is not a MapNode")
+
+        prepared_inputs = self._prepare_inputs(node_name)
+        if inputs:
+            prepared_inputs.update(inputs)
+
+        items = prepared_inputs.get("items", [])
+        if not isinstance(items, list):
+            items = [items]
+
+        if item_index < 0 or item_index >= len(items):
+            raise IndexError(f"Item index {item_index} out of range")
+
+        item = items[item_index]
+        context_inputs = {k: v for k, v in prepared_inputs.items() if k != "items"}
+
+        fn_kwargs = {node._item_param: item}
+        fn_kwargs.update(context_inputs)
+        result = node.fn(**fn_kwargs)
+
+        if node_name in self.map_results:
+            self.map_results[node_name][item_index] = result
+
+        return result
 
     def execute_all(self, entry_inputs: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         execution_order = self.graph.get_execution_order()

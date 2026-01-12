@@ -38,7 +38,6 @@ class Graph:
             node.discover_api()
 
     def _add_edge(self, edge: Any) -> None:
-
         self._add_node(edge.source_node)
         self._add_node(edge.target_node)
 
@@ -68,6 +67,8 @@ class Graph:
 
         ui_generator = UIGenerator(self)
         demo = ui_generator.generate_ui()
+        if hasattr(ui_generator, "_custom_css"):
+            kwargs.setdefault("css", ui_generator._custom_css)
         return demo.launch(**kwargs)
 
     def __repr__(self):
