@@ -4,6 +4,9 @@
 
 `daggr` is a Python package for building resilient AI workflows that connect Gradio apps, ML models via inference providers, and custom functions.
 
+<img width="1301" height="761" alt="image" src="https://github.com/user-attachments/assets/18e343ec-5c3b-4981-ad00-2173db7d3d4f" />
+
+
 ## Installation
 
 This package requires [Python 3.10 or higher](https://www.python.org/downloads/). Install with `pip`:
@@ -140,6 +143,11 @@ with Graph(name="Podcast Generator") as graph:
 
 graph.launch()
 ```
+
+produces:
+
+<img width="1301" height="761" alt="image" src="https://github.com/user-attachments/assets/70d48a8e-5482-4532-8452-93f9445aaaa9" />
+
 
 ### Test App
 
