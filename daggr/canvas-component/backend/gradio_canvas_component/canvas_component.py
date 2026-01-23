@@ -75,8 +75,10 @@ class CanvasComponent(Component):
         return {"name": "Example Workflow", "nodes": [], "edges": []}
 
     def api_info(self) -> dict[str, Any]:
-        return {"type": "object", "description": "Canvas data with name, nodes, and edges"}
-    
+        return {
+            "type": "object",
+            "description": "Canvas data with name, nodes, and edges",
+        }
+
     def get_block_name(self) -> str:
         return "canvascomponent"
-

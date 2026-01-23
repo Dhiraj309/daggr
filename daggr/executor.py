@@ -37,7 +37,9 @@ class SequentialExecutor:
                 gathered.append(edge)
         return gathered
 
-    def _prepare_inputs(self, node_name: str, skip_scattered: bool = False) -> Dict[str, Any]:
+    def _prepare_inputs(
+        self, node_name: str, skip_scattered: bool = False
+    ) -> Dict[str, Any]:
         inputs = {}
 
         for edge in self.graph._edges:
@@ -52,21 +54,33 @@ class SequentialExecutor:
                 if source_name in self.results:
                     source_result = self.results[source_name]
 
-                    if edge.is_gathered and isinstance(source_result, dict) and "_scattered_results" in source_result:
+                    if (
+                        edge.is_gathered
+                        and isinstance(source_result, dict)
+                        and "_scattered_results" in source_result
+                    ):
                         scattered_results = source_result["_scattered_results"]
                         extracted = []
                         for item_result in scattered_results:
-                            if isinstance(item_result, dict) and source_output in item_result:
+                            if (
+                                isinstance(item_result, dict)
+                                and source_output in item_result
+                            ):
                                 extracted.append(item_result[source_output])
                             else:
                                 extracted.append(item_result)
                         inputs[target_input] = extracted
-                    elif isinstance(source_result, dict) and source_output in source_result:
+                    elif (
+                        isinstance(source_result, dict)
+                        and source_output in source_result
+                    ):
                         inputs[target_input] = source_result[source_output]
                     elif isinstance(source_result, (list, tuple)):
                         try:
                             output_idx = int(
-                                source_output.replace("output_", "").replace("output", "0")
+                                source_output.replace("output_", "").replace(
+                                    "output", "0"
+                                )
                             )
                             if 0 <= output_idx < len(source_result):
                                 inputs[target_input] = source_result[output_idx]
@@ -78,10 +92,14 @@ class SequentialExecutor:
 
         return inputs
 
-    def _execute_single_node(
-        self, node_name: str, inputs: Dict[str, Any]
-    ) -> Any:
-        from daggr.node import FnNode, GradioNode, InferenceNode, InputNode, InteractionNode
+    def _execute_single_node(self, node_name: str, inputs: Dict[str, Any]) -> Any:
+        from daggr.node import (
+            FnNode,
+            GradioNode,
+            InferenceNode,
+            InputNode,
+            InteractionNode,
+        )
 
         node = self.graph.nodes[node_name]
 
@@ -131,13 +149,13 @@ class SequentialExecutor:
     def execute_node(
         self, node_name: str, user_inputs: Optional[Dict[str, Any]] = None
     ) -> Any:
-        from daggr.node import InputNode
-
         node = self.graph.nodes[node_name]
         scattered_edge = self._get_scattered_input_edge(node_name)
 
         if scattered_edge:
-            result = self._execute_scattered_node(node_name, scattered_edge, user_inputs)
+            result = self._execute_scattered_node(
+                node_name, scattered_edge, user_inputs
+            )
         else:
             inputs = self._prepare_inputs(node_name)
             if user_inputs:

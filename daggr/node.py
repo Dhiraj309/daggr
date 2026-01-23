@@ -205,5 +205,3 @@ class InputNode(Node):
         if hasattr(component, "label") and component.label:
             return component.label
         return f"input_{index}"
-
-

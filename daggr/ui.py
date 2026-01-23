@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 class WorkflowCanvas(gr.HTML):
     """Legacy HTML-based canvas - kept for reference."""
+
     def __init__(self, graph_data: dict | None = None, **kwargs):
         html_template = """
         <div class="workflow-container">
@@ -1233,7 +1234,9 @@ class UIGenerator:
             )
         return components
 
-    def _build_scattered_items(self, node_name: str, result: Any = None) -> List[Dict[str, Any]]:
+    def _build_scattered_items(
+        self, node_name: str, result: Any = None
+    ) -> List[Dict[str, Any]]:
         scattered_edge = self._get_scattered_edge(node_name)
         if not scattered_edge:
             return []
@@ -1351,9 +1354,15 @@ class UIGenerator:
             result = node_results.get(node_name)
             result_str = ""
             is_scattered = self._has_scattered_input(node_name)
-            if result is not None and not hasattr(node, "_output_components") and not is_scattered:
+            if (
+                result is not None
+                and not hasattr(node, "_output_components")
+                and not is_scattered
+            ):
                 if isinstance(result, dict):
-                    display_result = {k: v for k, v in result.items() if not k.startswith("_")}
+                    display_result = {
+                        k: v for k, v in result.items() if not k.startswith("_")
+                    }
                     result_str = json.dumps(display_result, indent=2, default=str)[:300]
                 elif isinstance(result, (list, tuple)):
                     result_str = json.dumps(list(result)[:5], default=str)
@@ -1379,7 +1388,9 @@ class UIGenerator:
                         comp["value"] = input_values[node_name][comp["label"]]
 
             output_components = self._build_output_components(node, result)
-            scattered_items = self._build_scattered_items(node_name, result) if is_scattered else []
+            scattered_items = (
+                self._build_scattered_items(node_name, result) if is_scattered else []
+            )
 
             item_output_type = "text"
             scattered_edge = self._get_scattered_edge(node_name)
