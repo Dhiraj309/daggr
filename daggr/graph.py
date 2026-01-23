@@ -1,20 +1,31 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence
 
 import networkx as nx
 
 from daggr.edge import Edge
-from daggr.node import GradioNode, Node
+from daggr.node import Node
 from daggr.port import Port
 
 
 class Graph:
-    def __init__(self, name: str = "daggr-workflow"):
+    def __init__(
+        self, name: str = "daggr-workflow", nodes: Optional[Sequence[Node]] = None
+    ):
         self.name = name
         self.nodes: Dict[str, Node] = {}
         self._nx_graph = nx.DiGraph()
         self._edges: List[Edge] = []
+
+        if nodes:
+            for node in nodes:
+                self.add(node)
+
+    def add(self, node: Node) -> Graph:
+        self._add_node(node)
+        self._create_edges_from_port_connections(node)
+        return self
 
     def edge(self, source: Port, target: Port) -> Graph:
         edge = Edge(source, target)
@@ -29,8 +40,12 @@ class Graph:
         self.nodes[node._name] = node
         self._nx_graph.add_node(node._name)
 
-        if isinstance(node, GradioNode):
-            node.discover_api()
+    def _create_edges_from_port_connections(self, node: Node) -> None:
+        for target_port_name, source_port in node._port_connections.items():
+            self._add_node(source_port.node)
+            target_port = Port(node, target_port_name)
+            edge = Edge(source_port, target_port)
+            self._add_edge(edge)
 
     def _add_edge(self, edge: Edge) -> None:
         self._add_node(edge.source_node)

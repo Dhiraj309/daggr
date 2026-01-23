@@ -65,6 +65,10 @@ def gather(port: Port) -> GatheredPort:
 PortLike = Union[Port, ScatteredPort, GatheredPort]
 
 
+def is_port(obj: Any) -> bool:
+    return isinstance(obj, (Port, ScatteredPort, GatheredPort))
+
+
 class PortNamespace:
     def __init__(self, node: Node, port_names: list[str]):
         self._node = node

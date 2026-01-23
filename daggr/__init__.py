@@ -9,7 +9,7 @@ from daggr.node import (
     InteractionNode,
     Node,
 )
-from daggr.port import gather, scatter
+from daggr.port import gather, is_port, scatter
 
 __all__ = [
     "Graph",
@@ -21,4 +21,5 @@ __all__ = [
     "ops",
     "scatter",
     "gather",
+    "is_port",
 ]

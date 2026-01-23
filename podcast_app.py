@@ -1,10 +1,10 @@
 import gradio as gr
 
-from daggr import FnNode, GradioNode
+from daggr import Graph, FnNode, GradioNode
 
 host_voice = GradioNode(
-    space_or_url="qwen3tts/qwen3tts-v1-0",
-    api_name="generate_voice_design",
+    space_or_url="Qwen/Qwen3-TTS",
+    api_name="/generate_voice_design",
     inputs={
         "voice_description": gr.Textbox(
             label="Host Voice Description",
@@ -21,8 +21,8 @@ host_voice = GradioNode(
 
 
 guest_voice = GradioNode(
-    space_or_url="qwen3tts/qwen3tts-v1-0",
-    api_name="generate_voice_design",
+    space_or_url="Qwen/Qwen3-TTS",
+    api_name="/generate_voice_design",
     inputs={
         "voice_description": gr.Textbox(
             label="Guest Voice Description",
@@ -49,19 +49,17 @@ def generate_dialogue(topic: str, host_voice: str, guest_voice: str) -> list[dic
 
 dialogue = FnNode(
     fn=generate_dialogue,
-    inputs={"topic": gr.Textbox(label="Topic", value="AI in healthcare...")},
+    inputs={
+        "topic": gr.Textbox(label="Topic", value="AI in healthcare..."),
+        "host_voice": host_voice.audio,
+        "guest_voice": guest_voice.audio,
+    },
     outputs={
         "dialogue": gr.JSON(label="Dialogue", visible=False),
         "markdown": gr.Markdown(label="Dialogue"),
     },
 )
 
-graph = Graph(name="Podcast Generator")
-
-(
-    graph.edge(host_voice.audio, dialogue.host_voice).edge(
-        guest_voice.audio, dialogue.guest_voice
-    )
-)
+graph = Graph(name="Podcast Generator", nodes=[host_voice, guest_voice, dialogue])
 
 graph.launch()

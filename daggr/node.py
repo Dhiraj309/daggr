@@ -5,7 +5,7 @@ import warnings
 from abc import ABC
 from typing import Any, Callable, Dict, List, Optional
 
-from daggr.port import Port, PortNamespace
+from daggr.port import Port, PortNamespace, is_port
 
 
 def _is_gradio_component(obj: Any) -> bool:
@@ -57,6 +57,7 @@ class Node(ABC):
         self._input_components: Dict[str, Any] = {}
         self._output_components: Dict[str, Any] = {}
         self._fixed_inputs: Dict[str, Any] = {}
+        self._port_connections: Dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Port:
         if name.startswith("_"):
@@ -106,6 +107,8 @@ class Node(ABC):
 
 
 class GradioNode(Node):
+    _name_counters: Dict[str, int] = {}
+
     def __init__(
         self,
         space_or_url: str,
@@ -117,10 +120,15 @@ class GradioNode(Node):
         super().__init__(name)
         self._src = space_or_url
         self._api_name = api_name
-        self._discovered = False
 
         if not self._name:
-            self._name = self._src.split("/")[-1]
+            base_name = self._src.split("/")[-1]
+            if base_name not in GradioNode._name_counters:
+                GradioNode._name_counters[base_name] = 0
+                self._name = base_name
+            else:
+                GradioNode._name_counters[base_name] += 1
+                self._name = f"{base_name}_{GradioNode._name_counters[base_name]}"
 
         self._process_inputs(inputs or {})
         self._process_outputs(outputs or {})
@@ -129,7 +137,9 @@ class GradioNode(Node):
     def _process_inputs(self, inputs: Dict[str, Any]):
         for port_name, value in inputs.items():
             self._input_ports.append(port_name)
-            if _is_gradio_component(value):
+            if is_port(value):
+                self._port_connections[port_name] = value
+            elif _is_gradio_component(value):
                 self._input_components[port_name] = value
             else:
                 self._fixed_inputs[port_name] = value
@@ -139,9 +149,6 @@ class GradioNode(Node):
             self._output_ports.append(port_name)
             if _is_gradio_component(component):
                 self._output_components[port_name] = component
-
-    def discover_api(self):
-        pass
 
 
 class InferenceNode(Node):
@@ -173,7 +180,9 @@ class InferenceNode(Node):
     def _process_inputs(self, inputs: Dict[str, Any]):
         for port_name, value in inputs.items():
             self._input_ports.append(port_name)
-            if _is_gradio_component(value):
+            if is_port(value):
+                self._port_connections[port_name] = value
+            elif _is_gradio_component(value):
                 self._input_components[port_name] = value
             else:
                 self._fixed_inputs[port_name] = value
@@ -218,7 +227,9 @@ class FnNode(Node):
     def _process_inputs(self, inputs: Dict[str, Any]):
         for port_name, value in inputs.items():
             self._input_ports.append(port_name)
-            if _is_gradio_component(value):
+            if is_port(value):
+                self._port_connections[port_name] = value
+            elif _is_gradio_component(value):
                 self._input_components[port_name] = value
             else:
                 self._fixed_inputs[port_name] = value
@@ -259,7 +270,9 @@ class InteractionNode(Node):
     def _process_inputs(self, inputs: Dict[str, Any]):
         for port_name, value in inputs.items():
             self._input_ports.append(port_name)
-            if _is_gradio_component(value):
+            if is_port(value):
+                self._port_connections[port_name] = value
+            elif _is_gradio_component(value):
                 self._input_components[port_name] = value
             else:
                 self._fixed_inputs[port_name] = value

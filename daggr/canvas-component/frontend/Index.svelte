@@ -254,6 +254,7 @@
 		/>
 	{/if}
 
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div 
 		class="canvas"
 		bind:this={canvasEl}
@@ -463,7 +464,7 @@
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
-		padding: 3px 8px;
+		padding: 3px 8px !important;
 		border-radius: 4px;
 		color: #fff;
 		flex-shrink: 0;
