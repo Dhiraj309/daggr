@@ -13,7 +13,7 @@ class CanvasComponent(Component):
     A canvas component for displaying DAG-based workflows with nodes and edges.
     """
 
-    EVENTS = [Events.change]
+    EVENTS = [Events.change, Events.input]
 
     def __init__(
         self,

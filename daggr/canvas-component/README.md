@@ -204,6 +204,7 @@ int | str | None
 | name | description |
 |:-----|:------------|
 | `change` | Triggered when the value of the CanvasComponent changes either because of user input (e.g. a user types in a textbox) OR because of a function update (e.g. an image receives a value from the output of an event trigger). See `.input()` for a listener that is only triggered by user input. |
+| `input` | This listener is triggered when the user changes the value of the CanvasComponent. |
 
 
 

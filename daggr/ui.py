@@ -641,12 +641,18 @@ class UIGenerator:
 
         def handle_canvas_action(canvas_data):
             if not canvas_data:
+                print("[DEBUG] No canvas_data, returning initial graph")
                 return self._build_graph_data()
 
             run_to_node = canvas_data.get("run_to_node")
+            run_id = canvas_data.get("run_id")
             if run_to_node:
                 canvas_data["run_to_node"] = None
-                return self._execute_to_node(canvas_data, run_to_node)
+                canvas_data["run_id"] = None
+                result = self._execute_to_node(canvas_data, run_to_node)
+                if run_id:
+                    result["completed_run_id"] = run_id
+                return result
 
             return canvas_data
 
@@ -657,6 +663,16 @@ class UIGenerator:
                 fn=handle_canvas_action,
                 inputs=[canvas],
                 outputs=[canvas],
+                show_progress="hidden",
+                trigger_mode="multiple"
+            )
+            
+            canvas.input(
+                fn=handle_canvas_action,
+                inputs=[canvas],
+                outputs=[canvas],
+                show_progress="hidden",
+                trigger_mode="multiple"
             )
 
         return demo
@@ -675,6 +691,8 @@ class UIGenerator:
     def _execute_to_node(self, canvas_data: dict, target_node: str) -> dict:
         from daggr.node import InteractionNode
 
+        print(f"[RUN] Executing to node: {target_node}")
+
         self.session_id = canvas_data.get("session_id") if canvas_data else None
         if not self.session_id:
             self.session_id = self.state.create_session(self.graph.name)
@@ -684,6 +702,7 @@ class UIGenerator:
 
         execution_order = self.graph.get_execution_order()
         nodes_to_execute = [n for n in execution_order if n in nodes_to_run]
+        print(f"[RUN] Execution order: {nodes_to_execute}")
 
         input_values = canvas_data.get("inputs", {}) if canvas_data else {}
         history = canvas_data.get("history", {}) if canvas_data else {}
@@ -709,15 +728,18 @@ class UIGenerator:
 
         try:
             for node_name in nodes_to_execute:
+                print(f"[RUN] {node_name}...")
                 node_statuses[node_name] = "running"
                 user_input = entry_inputs.get(node_name, {})
                 result = self.executor.execute_node(node_name, user_input)
                 node_results[node_name] = result
                 node_statuses[node_name] = "completed"
+                print(f"[RUN] {node_name} ✓")
 
                 self.state.save_result(self.session_id, node_name, result)
 
         except Exception as e:
+            print(f"[RUN] Error: {e}")
             if nodes_to_execute:
                 current_idx = len(node_results)
                 if current_idx < len(nodes_to_execute):

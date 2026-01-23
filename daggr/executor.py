@@ -21,7 +21,7 @@ class SequentialExecutor:
             if isinstance(node, GradioNode):
                 from gradio_client import Client
 
-                self.clients[node_name] = Client(node._src)
+                self.clients[node_name] = Client(node._src, download_files=False)
         return self.clients.get(node_name)
 
     def _get_scattered_input_edge(self, node_name: str):
@@ -146,9 +146,21 @@ class SequentialExecutor:
 
         return result
 
+    def _extract_file_urls(self, data: Any) -> Any:
+        from gradio_client.utils import is_file_obj_with_meta, traverse
+
+        def extract_url(file_obj: dict) -> str:
+            if "url" in file_obj and file_obj["url"]:
+                return file_obj["url"]
+            return file_obj.get("path", file_obj)
+
+        return traverse(data, extract_url, is_file_obj_with_meta)
+
     def _map_gradio_result(self, node, raw_result: Any) -> Dict[str, Any]:
         if raw_result is None:
             return {}
+
+        raw_result = self._extract_file_urls(raw_result)
 
         output_ports = node._output_ports
         if not output_ports:
@@ -158,7 +170,7 @@ class SequentialExecutor:
             result = {}
             for i, port_name in enumerate(output_ports):
                 if i < len(raw_result):
-                    result[port_name] = raw_result[i]
+                    result[port_name] = self._extract_file_urls(raw_result[i])
                 else:
                     result[port_name] = None
             return result

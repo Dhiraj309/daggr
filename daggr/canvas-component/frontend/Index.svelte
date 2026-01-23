@@ -75,6 +75,24 @@
 	// Track input component values (keyed by node.id for correct data flow)
 	let inputValues = $state<Record<string, Record<string, any>>>({});
 
+	// Track pending run IDs per node (queue of run IDs waiting for results)
+	let pendingRunIds = $state<Record<string, string[]>>({});
+
+	// Track multiple results per node (array of results)
+	let nodeResults = $state<Record<string, any[]>>({});
+
+	// Track which result index is selected per node
+	let selectedResultIndex = $state<Record<string, number>>({});
+
+	// Computed running counts from pending runs
+	let runningCounts = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		for (const [nodeName, ids] of Object.entries(pendingRunIds)) {
+			counts[nodeName] = ids.length;
+		}
+		return counts;
+	});
+
 	function handleInputChange(nodeId: string, portName: string, value: any) {
 		if (!inputValues[nodeId]) {
 			inputValues[nodeId] = {};
@@ -90,10 +108,8 @@
 		if (node.is_input_node && node.input_components?.length) {
 			return node.input_components;
 		}
-		if (node.output_components?.length) {
-			return node.output_components;
-		}
-		return [];
+		// For output nodes, use selected results if available
+		return getSelectedResults(node);
 	}
 
 	// Node layout constants - MUST match CSS exactly
@@ -232,12 +248,25 @@
 
 	function handleRunToNode(e: MouseEvent, nodeName: string) {
 		e.stopPropagation();
+		console.log("[DEBUG] Run button clicked for node:", nodeName);
+		
+		// Generate unique run ID and add to pending
+		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+		if (!pendingRunIds[nodeName]) {
+			pendingRunIds[nodeName] = [];
+		}
+		pendingRunIds[nodeName] = [...pendingRunIds[nodeName], runId];
+		
 		if (gradio.props.value) {
-			gradio.props.value = {
+			const newValue = {
 				...gradio.props.value,
 				inputs: { ...gradio.props.value.inputs, ...inputValues },
-				run_to_node: nodeName
+				run_to_node: nodeName,
+				run_id: runId
 			};
+			gradio.props.value = newValue;
+			gradio.dispatch("input", newValue);
+			gradio.dispatch("change", newValue);
 		}
 	}
 
@@ -250,6 +279,78 @@
 			'MODEL': '#22c55e',
 		};
 		return `background: ${colors[type] || '#666'};`;
+	}
+
+	// Process incoming results from backend
+	$effect(() => {
+		const data = gradio.props.value;
+		if (!data) return;
+		
+		// Check if this response includes a completed run_id
+		const completedRunId = data.completed_run_id;
+		if (!completedRunId) return;
+		
+		// Find which node this run_id belongs to
+		for (const [nodeName, ids] of Object.entries(pendingRunIds)) {
+			const idx = ids.indexOf(completedRunId);
+			if (idx !== -1) {
+				// Remove this run_id from pending
+				pendingRunIds[nodeName] = ids.filter((_, i) => i !== idx);
+				
+				// Find the node and add its result
+				const node = data.nodes?.find((n: GraphNode) => n.name === nodeName);
+				if (node && node.output_components?.length > 0) {
+					const hasResult = node.output_components.some((c: GradioComponentData) => c.value != null);
+					if (hasResult) {
+						if (!nodeResults[nodeName]) {
+							nodeResults[nodeName] = [];
+						}
+						
+						const resultSnapshot = node.output_components.map((c: GradioComponentData) => ({
+							...c
+						}));
+						
+						nodeResults[nodeName] = [...nodeResults[nodeName], resultSnapshot];
+						selectedResultIndex[nodeName] = nodeResults[nodeName].length - 1;
+					}
+				}
+				break;
+			}
+		}
+	});
+
+	// Get the currently selected results for a node
+	function getSelectedResults(node: GraphNode): GradioComponentData[] {
+		const results = nodeResults[node.name];
+		if (!results || results.length === 0) {
+			return node.output_components || [];
+		}
+		const idx = selectedResultIndex[node.name] ?? results.length - 1;
+		return results[idx] || node.output_components || [];
+	}
+
+	// Get total result count for a node
+	function getResultCount(nodeName: string): number {
+		return nodeResults[nodeName]?.length || 0;
+	}
+
+	// Navigate to previous result
+	function prevResult(e: MouseEvent, nodeName: string) {
+		e.stopPropagation();
+		const current = selectedResultIndex[nodeName] ?? 0;
+		if (current > 0) {
+			selectedResultIndex[nodeName] = current - 1;
+		}
+	}
+
+	// Navigate to next result
+	function nextResult(e: MouseEvent, nodeName: string) {
+		e.stopPropagation();
+		const total = getResultCount(nodeName);
+		const current = selectedResultIndex[nodeName] ?? 0;
+		if (current < total - 1) {
+			selectedResultIndex[nodeName] = current + 1;
+		}
 	}
 
 	// Zoom percentage display
@@ -313,11 +414,17 @@
 						{#if !node.is_input_node}
 							<span 
 								class="run-btn"
+								class:running={runningCounts[node.name] > 0}
 								onclick={(e) => handleRunToNode(e, node.name)}
 								title="Run to here"
 								role="button"
 								tabindex="0"
-							>▶</span>
+							>
+								▶
+								{#if runningCounts[node.name] > 0}
+									<span class="run-badge">{runningCounts[node.name]}</span>
+								{/if}
+							</span>
 						{/if}
 					</div>
 
@@ -399,10 +506,12 @@
 											<pre class="gr-json">{typeof comp.value === 'string' ? comp.value : JSON.stringify(comp.value, null, 2)}</pre>
 										</div>
 									{:else if comp.component === 'audio'}
-										<div class="gr-textbox-wrap">
+										<div class="gr-audio-wrap">
 											<span class="gr-label">{comp.props?.label || comp.port_name}</span>
 											{#if comp.value}
-												<audio controls class="gr-audio" src={comp.value?.url || comp.value}></audio>
+												<div class="gr-audio-container">
+													<audio controls class="gr-audio" src={comp.value?.url || comp.value}></audio>
+												</div>
 											{:else}
 												<div class="gr-empty">No audio</div>
 											{/if}
@@ -427,6 +536,24 @@
 								</div>
 							{/each}
 						</div>
+						
+						{#if !node.is_input_node && getResultCount(node.name) > 1}
+							<div class="result-selector">
+								<button 
+									class="result-nav" 
+									onclick={(e) => prevResult(e, node.name)}
+									disabled={(selectedResultIndex[node.name] ?? 0) === 0}
+								>‹</button>
+								<span class="result-counter">
+									{(selectedResultIndex[node.name] ?? 0) + 1}/{getResultCount(node.name)}
+								</span>
+								<button 
+									class="result-nav" 
+									onclick={(e) => nextResult(e, node.name)}
+									disabled={(selectedResultIndex[node.name] ?? 0) >= getResultCount(node.name) - 1}
+								>›</button>
+							</div>
+						{/if}
 					{/if}
 				</div>
 			{/each}
@@ -585,6 +712,7 @@
 	}
 
 	.run-btn {
+		position: relative;
 		font-size: 10px;
 		color: #f97316;
 		cursor: pointer;
@@ -598,6 +726,32 @@
 
 	.run-btn:hover {
 		background: rgba(249, 115, 22, 0.2);
+	}
+
+	.run-btn.running {
+		animation: pulse 1.5s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+		50% { box-shadow: 0 0 0 4px rgba(249, 115, 22, 0); }
+	}
+
+	.run-badge {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		min-width: 14px;
+		height: 14px;
+		background: #f97316;
+		color: #000;
+		font-size: 9px;
+		font-weight: 700;
+		border-radius: 7px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 3px;
 	}
 
 	.node-body {
@@ -751,9 +905,25 @@
 		word-break: break-all;
 	}
 
+	.gr-audio-wrap {
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.gr-audio-container {
+		padding: 6px 8px 8px;
+		background: linear-gradient(135deg, #2a2a2a 0%, #222 100%);
+		border-radius: 4px;
+		margin: 6px 8px 8px;
+	}
+
 	.gr-audio {
 		width: 100%;
 		height: 32px;
+		border-radius: 4px;
+		filter: brightness(0.85) contrast(1.1) saturate(0.9);
 	}
 
 	.gr-image {
@@ -797,5 +967,49 @@
 		word-break: break-all;
 		max-height: 60px;
 		overflow: auto;
+	}
+
+	.result-selector {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 6px 10px;
+		background: rgba(249, 115, 22, 0.05);
+		border-top: 1px solid rgba(249, 115, 22, 0.1);
+	}
+
+	.result-nav {
+		width: 20px;
+		height: 20px;
+		border: none;
+		background: rgba(249, 115, 22, 0.1);
+		color: #f97316;
+		font-size: 14px;
+		font-weight: 600;
+		border-radius: 4px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.15s;
+	}
+
+	.result-nav:hover:not(:disabled) {
+		background: rgba(249, 115, 22, 0.25);
+	}
+
+	.result-nav:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+
+	.result-counter {
+		font-size: 11px;
+		font-weight: 600;
+		color: #888;
+		font-family: 'SF Mono', Monaco, monospace;
+		min-width: 32px;
+		text-align: center;
 	}
 </style>

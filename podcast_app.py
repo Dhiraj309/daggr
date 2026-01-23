@@ -3,7 +3,7 @@ import gradio as gr
 from daggr import Graph, FnNode, GradioNode
 
 host_voice = GradioNode(
-    space_or_url="Qwen/Qwen3-TTS",
+    space_or_url="abidlabs/tts",
     api_name="/generate_voice_design",
     inputs={
         "voice_description": gr.Textbox(
@@ -11,7 +11,7 @@ host_voice = GradioNode(
             value="Deep British voice that is very professional and authoritative...",
             lines=3,
         ),
-        "language": "auto",
+        "language": "Auto",
         "text": "Hi! I'm the host of podcast. It's going to be a great episode!",
     },
     outputs={
@@ -30,11 +30,11 @@ guest_voice = GradioNode(
             value="Energetic, friendly young voice with American accent...",
             lines=3,
         ),
-        "language": "auto",
+        "language": "Auto",
         "text": "Hi! I'm the guest of podcast. Super excited to be here!",
     },
     outputs={
-        "audio": gr.Audio(label="Gues Voice"),
+        "audio": gr.Audio(label="Guest Voice"),
         "status": gr.Text(visible=False),
     },
 )
