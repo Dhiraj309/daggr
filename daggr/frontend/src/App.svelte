@@ -1,71 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	
-	interface Port {
-		name: string;
-		history_count?: number;
-	}
-
-	interface GradioComponentData {
-		component: string;
-		type: string;
-		port_name: string;
-		props: Record<string, any>;
-		value?: any;
-	}
-
-	interface MapItem {
-		index: number;
-		preview: string;
-		output: string | null;
-		is_audio_output: boolean;
-		status?: string;
-	}
-
-	interface ItemListItem {
-		index: number;
-		fields: Record<string, any>;
-	}
-
-	interface GraphNode {
-		id: string;
-		name: string;
-		type: string;
-		inputs: Port[];
-		outputs: string[];
-		input_components?: GradioComponentData[];
-		output_components?: GradioComponentData[];
-		x: number;
-		y: number;
-		status: string;
-		is_output_node: boolean;
-		is_input_node: boolean;
-		is_map_node?: boolean;
-		map_items?: MapItem[];
-		map_item_count?: number;
-		item_list_schema?: GradioComponentData[];
-		item_list_items?: ItemListItem[];
-	}
-
-	interface GraphEdge {
-		id: string;
-		from_node: string;
-		from_port: string;
-		to_node: string;
-		to_port: string;
-		is_scattered?: boolean;
-		is_gathered?: boolean;
-	}
-
-	interface CanvasData {
-		name: string;
-		nodes: GraphNode[];
-		edges: GraphEdge[];
-		inputs?: Record<string, Record<string, string>>;
-		session_id?: string;
-		run_id?: string;
-		completed_node?: string;
-	}
+	import { EmbeddedComponent, MapItemsSection, ItemListSection } from './components';
+	import type { GraphNode, GraphEdge, CanvasData, GradioComponentData } from './types';
 
 	let canvasEl: HTMLDivElement;
 	let transform = $state({ x: 0, y: 0, scale: 1 });
@@ -100,6 +36,13 @@
 		}
 		return counts;
 	});
+
+	const NODE_WIDTH = 220;
+	const HEADER_HEIGHT = 36;
+	const HEADER_BORDER = 1;
+	const BODY_PADDING_TOP = 8;
+	const PORT_ROW_HEIGHT = 22;
+	const EMBEDDED_COMPONENT_HEIGHT = 60;
 
 	function generateSessionId(): string {
 		return 'session_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -151,7 +94,7 @@
 			scheduleReconnect();
 		};
 		
-		ws.onerror = (e) => {
+		ws.onerror = () => {
 			console.error('[daggr] WebSocket error');
 			isConnecting = false;
 		};
@@ -281,10 +224,11 @@
 		itemListValues[nodeId][itemIndex][fieldName] = value;
 	}
 
-	function getItemListValue(node: GraphNode, itemIndex: number, fieldName: string): any {
-		const edited = itemListValues[node.id]?.[itemIndex]?.[fieldName];
+	function getItemListValue(nodeId: string, itemIndex: number, fieldName: string): any {
+		const edited = itemListValues[nodeId]?.[itemIndex]?.[fieldName];
 		if (edited !== undefined) return edited;
-		const item = node.item_list_items?.find(i => i.index === itemIndex);
+		const node = nodes.find(n => n.id === nodeId);
+		const item = node?.item_list_items?.find(i => i.index === itemIndex);
 		return item?.fields?.[fieldName] ?? '';
 	}
 
@@ -294,13 +238,6 @@
 		}
 		return getSelectedResults(node);
 	}
-
-	const NODE_WIDTH = 220;
-	const HEADER_HEIGHT = 36;
-	const HEADER_BORDER = 1;
-	const BODY_PADDING_TOP = 8;
-	const PORT_ROW_HEIGHT = 22;
-	const EMBEDDED_COMPONENT_HEIGHT = 60;
 
 	function getNodeHeight(node: GraphNode): number {
 		const portRows = Math.max(node.inputs.length, node.outputs.length, 1);
@@ -562,72 +499,11 @@
 		}
 	}
 
-	let zoomPercent = $derived(Math.round(transform.scale * 100));
-
-	function handleReplayItem(e: MouseEvent, nodeName: string, itemIndex: number) {
-		e.stopPropagation();
+	function handleReplayItem(nodeName: string, itemIndex: number) {
 		console.log(`Replay item ${itemIndex} for node ${nodeName}`);
 	}
 
-	let audioElements = $state<Record<string, HTMLAudioElement>>({});
-	let audioStates = $state<Record<string, { playing: boolean; current: number; duration: number }>>({});
-
-	function formatTime(seconds: number): string {
-		if (!seconds || !isFinite(seconds)) return '0:00';
-		const mins = Math.floor(seconds / 60);
-		const secs = Math.floor(seconds % 60);
-		return `${mins}:${secs.toString().padStart(2, '0')}`;
-	}
-
-	function getAudioState(id: string) {
-		return audioStates[id] || { playing: false, current: 0, duration: 0 };
-	}
-
-	function toggleAudio(e: MouseEvent, id: string) {
-		e.stopPropagation();
-		const audio = audioElements[id];
-		if (!audio) return;
-		if (audio.paused) {
-			audio.play();
-		} else {
-			audio.pause();
-		}
-	}
-
-	function seekAudio(e: MouseEvent, id: string) {
-		e.stopPropagation();
-		const audio = audioElements[id];
-		if (!audio || !audio.duration) return;
-		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		const x = e.clientX - rect.left;
-		const percent = x / rect.width;
-		audio.currentTime = percent * audio.duration;
-	}
-
-	function registerAudio(el: HTMLAudioElement, id: string) {
-		audioElements[id] = el;
-		if (!audioStates[id]) {
-			audioStates[id] = { playing: false, current: 0, duration: 0 };
-		}
-		el.onloadedmetadata = () => {
-			audioStates[id] = { ...audioStates[id], duration: el.duration };
-		};
-		el.ontimeupdate = () => {
-			audioStates[id] = { ...audioStates[id], current: el.currentTime };
-		};
-		el.onplay = () => {
-			audioStates[id] = { ...audioStates[id], playing: true };
-		};
-		el.onpause = () => {
-			audioStates[id] = { ...audioStates[id], playing: false };
-		};
-		el.onended = () => {
-			audioStates[id] = { ...audioStates[id], playing: false, current: 0 };
-		};
-		return {
-			destroy() {}
-		};
-	}
+	let zoomPercent = $derived(Math.round(transform.scale * 100));
 </script>
 
 <div 
@@ -654,10 +530,7 @@
 	>
 		<svg class="edges-svg">
 			{#each edgePaths as edge (edge.id)}
-				<path 
-					d={edge.d} 
-					class="edge-path"
-				/>
+				<path d={edge.d} class="edge-path" />
 				{#if edge.forkPaths}
 					{#each edge.forkPaths as forkD}
 						<path d={forkD} class="edge-path edge-fork" />
@@ -723,114 +596,13 @@
 				{#if componentsToRender.length > 0}
 					<div class="embedded-components">
 						{#each componentsToRender as comp (comp.port_name)}
-							<div class="embedded-component">
-								{#if comp.component === 'textbox' || comp.component === 'text'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										{#if comp.props?.lines && comp.props.lines > 1}
-											<textarea
-												class="gr-input"
-												placeholder={comp.props?.placeholder || ''}
-												rows={comp.props?.lines || 3}
-												disabled={!node.is_input_node}
-												value={getComponentValue(node, comp)}
-												oninput={(e) => handleInputChange(node.id, comp.port_name, (e.target as HTMLTextAreaElement).value)}
-											></textarea>
-										{:else}
-											<input
-												type="text"
-												class="gr-input"
-												placeholder={comp.props?.placeholder || ''}
-												disabled={!node.is_input_node}
-												value={getComponentValue(node, comp)}
-												oninput={(e) => handleInputChange(node.id, comp.port_name, (e.target as HTMLInputElement).value)}
-											/>
-										{/if}
-									</div>
-								{:else if comp.component === 'number'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										<input
-											type="number"
-											class="gr-input"
-											disabled={!node.is_input_node}
-											value={getComponentValue(node, comp)}
-											oninput={(e) => handleInputChange(node.id, comp.port_name, parseFloat((e.target as HTMLInputElement).value))}
-										/>
-									</div>
-								{:else if comp.component === 'checkbox'}
-									<label class="gr-checkbox-wrap">
-										<input
-											type="checkbox"
-											disabled={!node.is_input_node}
-											checked={getComponentValue(node, comp)}
-											onchange={(e) => handleInputChange(node.id, comp.port_name, (e.target as HTMLInputElement).checked)}
-										/>
-										<span class="gr-check-label">{comp.props?.label || comp.port_name}</span>
-									</label>
-								{:else if comp.component === 'markdown'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										<div class="gr-markdown">{@html comp.value || ''}</div>
-									</div>
-								{:else if comp.component === 'html'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										<div class="gr-html">{@html comp.value || ''}</div>
-									</div>
-								{:else if comp.component === 'json'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										<pre class="gr-json">{typeof comp.value === 'string' ? comp.value : JSON.stringify(comp.value, null, 2)}</pre>
-									</div>
-								{:else if comp.component === 'audio'}
-									{@const audioId = `${node.id}_${comp.port_name}`}
-									{@const audioSrc = comp.value?.url || comp.value}
-									{@const state = getAudioState(audioId)}
-									<div class="gr-audio-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										{#if audioSrc}
-											<audio 
-												src={audioSrc} 
-												preload="metadata"
-												style="display:none"
-												use:registerAudio={audioId}
-											></audio>
-											<div class="audio-player">
-												<button class="audio-play-btn" onclick={(e) => toggleAudio(e, audioId)}>
-													{#if state.playing}
-														<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-													{:else}
-														<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-													{/if}
-												</button>
-												<div class="audio-progress" onclick={(e) => seekAudio(e, audioId)}>
-													<div class="audio-progress-fill" style="width: {state.duration ? (state.current / state.duration) * 100 : 0}%"></div>
-												</div>
-												<span class="audio-time">{formatTime(state.current)} / {formatTime(state.duration)}</span>
-											</div>
-										{:else}
-											<div class="gr-empty">No audio</div>
-										{/if}
-									</div>
-								{:else if comp.component === 'image'}
-									<div class="gr-textbox-wrap">
-										<span class="gr-label">{comp.props?.label || comp.port_name}</span>
-										{#if comp.value}
-											<img class="gr-image" src={comp.value?.url || comp.value} alt={comp.props?.label || ''} />
-										{:else}
-											<div class="gr-empty">No image</div>
-										{/if}
-									</div>
-								{:else}
-									<div class="gr-fallback">
-										<span class="fallback-type">{comp.component}</span>
-										{#if comp.value}
-											<pre>{typeof comp.value === 'string' ? comp.value : JSON.stringify(comp.value, null, 2)}</pre>
-										{/if}
-									</div>
-								{/if}
-							</div>
+							<EmbeddedComponent
+								{comp}
+								nodeId={node.id}
+								isInputNode={node.is_input_node}
+								value={getComponentValue(node, comp)}
+								onchange={(portName, value) => handleInputChange(node.id, portName, value)}
+							/>
 						{/each}
 					</div>
 					
@@ -854,102 +626,22 @@
 				{/if}
 
 				{#if node.is_map_node && node.map_items && node.map_items.length > 0}
-					<div class="map-items-section">
-						<div class="map-items-header">
-							<span class="map-items-title">Items ({node.map_items.length})</span>
-						</div>
-						<div class="map-items-list">
-							{#each node.map_items as item (item.index)}
-								<div class="map-item" class:has-output={item.output}>
-									<div class="map-item-content">
-									{#if item.is_audio_output && item.output}
-										{@const audioId = `${node.id}_map_${item.index}`}
-										{@const state = getAudioState(audioId)}
-										<audio 
-											src={item.output} 
-											preload="metadata"
-											style="display:none"
-											use:registerAudio={audioId}
-										></audio>
-										<div class="audio-player audio-player-compact">
-											<button class="audio-play-btn" onclick={(e) => toggleAudio(e, audioId)}>
-												{#if state.playing}
-													<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-												{:else}
-													<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-												{/if}
-											</button>
-											<div class="audio-progress" onclick={(e) => seekAudio(e, audioId)}>
-												<div class="audio-progress-fill" style="width: {state.duration ? (state.current / state.duration) * 100 : 0}%"></div>
-											</div>
-											<span class="audio-time">{formatTime(state.current)} / {formatTime(state.duration)}</span>
-										</div>
-									{:else if item.output}
-											<span class="map-item-preview" title={item.output}>
-												{item.output.length > 40 ? item.output.slice(0, 40) + '...' : item.output}
-											</span>
-										{:else}
-											<span class="map-item-preview map-item-pending">Pending...</span>
-										{/if}
-									</div>
-									<button 
-										class="map-item-replay"
-										onclick={(e) => handleReplayItem(e, node.name, item.index)}
-										title={item.output ? "Replay this item" : "Run this item"}
-									>
-										{item.output ? '↻' : '▶'}
-									</button>
-								</div>
-							{/each}
-						</div>
-					</div>
+					<MapItemsSection
+						nodeId={node.id}
+						nodeName={node.name}
+						items={node.map_items}
+						onReplayItem={handleReplayItem}
+					/>
 				{/if}
 
 				{#if node.item_list_schema && node.item_list_items && node.item_list_items.length > 0}
-					<div class="item-list-section">
-						<div class="item-list-header">
-							<span class="item-list-title">Items ({node.item_list_items.length})</span>
-						</div>
-						<div class="item-list-items">
-							{#each node.item_list_items as item (item.index)}
-								<div class="item-list-item">
-									<div class="item-list-fields">
-										{#each node.item_list_schema as comp (comp.port_name)}
-											{#if comp.component === 'dropdown'}
-												{@const currentValue = getItemListValue(node, item.index, comp.port_name)}
-												<select
-													class="gr-select"
-													onchange={(e) => handleItemListChange(node.id, item.index, comp.port_name, (e.target as HTMLSelectElement).value)}
-												>
-													{#each comp.props?.choices || [] as choice}
-														<option value={choice} selected={choice === currentValue}>{choice}</option>
-													{/each}
-												</select>
-											{:else if comp.component === 'textbox' || comp.component === 'text'}
-												<div class="gr-textbox-wrap item-list-textbox">
-													{#if comp.props?.lines && comp.props.lines > 1}
-														<textarea
-															class="gr-input"
-															rows={comp.props?.lines || 2}
-															value={getItemListValue(node, item.index, comp.port_name)}
-															oninput={(e) => handleItemListChange(node.id, item.index, comp.port_name, (e.target as HTMLTextAreaElement).value)}
-														></textarea>
-													{:else}
-														<input
-															type="text"
-															class="gr-input"
-															value={getItemListValue(node, item.index, comp.port_name)}
-															oninput={(e) => handleItemListChange(node.id, item.index, comp.port_name, (e.target as HTMLInputElement).value)}
-														/>
-													{/if}
-												</div>
-											{/if}
-										{/each}
-									</div>
-								</div>
-							{/each}
-						</div>
-					</div>
+					<ItemListSection
+						nodeId={node.id}
+						schema={node.item_list_schema}
+						items={node.item_list_items}
+						getValue={getItemListValue}
+						onchange={handleItemListChange}
+					/>
 				{/if}
 			</div>
 		{/each}
@@ -1252,266 +944,6 @@
 		overflow-y: auto;
 	}
 
-	.embedded-component {
-		margin-bottom: 8px;
-	}
-
-	.embedded-component:last-child {
-		margin-bottom: 0;
-	}
-
-	.gr-textbox-wrap {
-		background: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.gr-label {
-		display: block;
-		font-size: 10px;
-		font-weight: 400;
-		color: #888;
-		padding: 6px 10px 0;
-	}
-
-	.gr-input {
-		width: 100%;
-		padding: 4px 10px 8px;
-		font-size: 11px;
-		font-family: inherit;
-		color: #e5e7eb;
-		background: transparent;
-		border: none;
-		outline: none;
-		box-sizing: border-box;
-	}
-
-	.gr-input::placeholder {
-		color: #555;
-	}
-
-	.gr-textbox-wrap:focus-within {
-		border-color: #f97316;
-	}
-
-	.gr-input:disabled {
-		opacity: 0.7;
-		cursor: not-allowed;
-	}
-
-	textarea.gr-input {
-		resize: none;
-		min-height: 36px;
-		line-height: 1.4;
-	}
-
-	.gr-checkbox-wrap {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		cursor: pointer;
-		padding: 6px 0;
-	}
-
-	.gr-checkbox-wrap input[type="checkbox"] {
-		width: 14px;
-		height: 14px;
-		accent-color: #f97316;
-		cursor: pointer;
-	}
-
-	.gr-check-label {
-		font-size: 11px;
-		color: #e5e7eb;
-	}
-
-	.gr-markdown {
-		font-size: 11px;
-		color: #d1d5db;
-		line-height: 1.4;
-		padding: 6px 10px 8px;
-		max-height: 100px;
-		overflow: auto;
-	}
-
-	.gr-html {
-		font-size: 11px;
-		color: #d1d5db;
-		line-height: 1.4;
-		padding: 6px 10px 8px;
-		max-height: 100px;
-		overflow: auto;
-	}
-
-	.gr-html :global(strong), .gr-html :global(b) {
-		font-weight: 600;
-		color: #f3f4f6;
-	}
-
-	.gr-html :global(em), .gr-html :global(i) {
-		font-style: italic;
-	}
-
-	.gr-html :global(a) {
-		color: #f97316;
-		text-decoration: underline;
-	}
-
-	.gr-html :global(code) {
-		font-family: 'SF Mono', Monaco, Consolas, monospace;
-		background: rgba(249, 115, 22, 0.1);
-		padding: 1px 4px;
-		border-radius: 3px;
-		font-size: 10px;
-	}
-
-	.gr-json {
-		font-size: 10px;
-		font-family: 'SF Mono', Monaco, Consolas, monospace;
-		color: #9ca3af;
-		padding: 6px 10px 8px;
-		max-height: 100px;
-		overflow: auto;
-		margin: 0;
-		white-space: pre-wrap;
-		word-break: break-all;
-	}
-
-	.gr-audio-wrap {
-		background: #1a1a1a;
-		border: 1px solid #333;
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.audio-player {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 10px;
-		background: linear-gradient(135deg, #1e1e1e 0%, #171717 100%);
-	}
-
-	.audio-player-compact {
-		padding: 6px 8px;
-		gap: 6px;
-		flex: 1;
-	}
-
-	.audio-play-btn {
-		width: 28px;
-		height: 28px;
-		border: none;
-		background: #f97316;
-		color: #000;
-		border-radius: 50%;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		transition: all 0.15s;
-	}
-
-	.audio-play-btn:hover {
-		background: #fb923c;
-		transform: scale(1.05);
-	}
-
-	.audio-play-btn svg {
-		width: 14px;
-		height: 14px;
-	}
-
-	.audio-player-compact .audio-play-btn {
-		width: 24px;
-		height: 24px;
-	}
-
-	.audio-player-compact .audio-play-btn svg {
-		width: 12px;
-		height: 12px;
-	}
-
-	.audio-progress {
-		flex: 1;
-		height: 6px;
-		background: #333;
-		border-radius: 3px;
-		cursor: pointer;
-		position: relative;
-		overflow: hidden;
-	}
-
-	.audio-progress:hover {
-		height: 8px;
-	}
-
-	.audio-progress-fill {
-		height: 100%;
-		background: linear-gradient(90deg, #f97316 0%, #fb923c 100%);
-		border-radius: 3px;
-		transition: width 0.1s linear;
-	}
-
-	.audio-time {
-		font-size: 10px;
-		font-family: 'SF Mono', Monaco, monospace;
-		color: #888;
-		min-width: 70px;
-		text-align: right;
-		flex-shrink: 0;
-	}
-
-	.audio-player-compact .audio-time {
-		font-size: 9px;
-		min-width: 60px;
-	}
-
-	.gr-image {
-		width: 100%;
-		max-height: 80px;
-		object-fit: contain;
-	}
-
-	.gr-empty {
-		font-size: 11px;
-		color: #555;
-		font-style: italic;
-		padding: 10px;
-		text-align: center;
-	}
-
-	.gr-fallback {
-		font-size: 10px;
-		color: #9ca3af;
-		background: #1a1a1a;
-		border: 1px solid #333;
-		padding: 8px 10px;
-		border-radius: 6px;
-	}
-
-	.gr-fallback .fallback-type {
-		display: inline-block;
-		color: #666;
-		font-style: italic;
-		font-size: 9px;
-		background: #2a2a2a;
-		padding: 2px 6px;
-		border-radius: 4px;
-		margin-bottom: 4px;
-	}
-
-	.gr-fallback pre {
-		margin: 0;
-		font-size: 9px;
-		white-space: pre-wrap;
-		word-break: break-all;
-		max-height: 60px;
-		overflow: auto;
-	}
-
 	.result-selector {
 		display: flex;
 		align-items: center;
@@ -1555,167 +987,4 @@
 		min-width: 32px;
 		text-align: center;
 	}
-
-	.map-items-section {
-		border-top: 1px solid rgba(34, 197, 94, 0.2);
-		background: rgba(34, 197, 94, 0.03);
-	}
-
-	.map-items-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 6px 10px;
-		border-bottom: 1px solid rgba(34, 197, 94, 0.1);
-	}
-
-	.map-items-title {
-		font-size: 10px;
-		font-weight: 600;
-		color: #22c55e;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.map-items-list {
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
-	.map-item {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 10px;
-		border-bottom: 1px solid rgba(34, 197, 94, 0.08);
-	}
-
-	.map-item:last-child {
-		border-bottom: none;
-	}
-
-	.map-item-content {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-
-	.map-item-preview {
-		flex: 1;
-		font-size: 10px;
-		color: #888;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.map-item.has-output .map-item-preview {
-		color: #aaa;
-	}
-
-	.map-item-pending {
-		color: #666;
-		font-style: italic;
-	}
-
-	.map-item-replay {
-		width: 20px;
-		height: 20px;
-		border: none;
-		background: rgba(34, 197, 94, 0.15);
-		color: #22c55e;
-		font-size: 10px;
-		border-radius: 4px;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all 0.15s;
-		flex-shrink: 0;
-		align-self: flex-start;
-		margin-top: 4px;
-	}
-
-	.map-item-replay:hover {
-		background: rgba(34, 197, 94, 0.3);
-	}
-
-
-
-	/* Item List Styles */
-	.item-list-section {
-		border-top: 1px solid rgba(34, 197, 94, 0.2);
-		background: rgba(34, 197, 94, 0.03);
-	}
-
-	.item-list-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 6px 10px;
-		border-bottom: 1px solid rgba(34, 197, 94, 0.1);
-	}
-
-	.item-list-title {
-		font-size: 10px;
-		font-weight: 600;
-		color: #22c55e;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.item-list-items {
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
-	.item-list-item {
-		display: flex;
-		align-items: flex-start;
-		gap: 8px;
-		padding: 8px 10px;
-		border-bottom: 1px solid rgba(34, 197, 94, 0.08);
-	}
-
-	.item-list-item:last-child {
-		border-bottom: none;
-	}
-
-	.item-list-fields {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-
-	.gr-select {
-		width: 100%;
-		padding: 6px 8px;
-		font-size: 11px;
-		background: rgba(34, 197, 94, 0.08);
-		border: 1px solid rgba(34, 197, 94, 0.2);
-		border-radius: 4px;
-		color: #e5e5e5;
-		cursor: pointer;
-	}
-
-	.gr-select:focus {
-		outline: none;
-		border-color: rgba(34, 197, 94, 0.5);
-	}
-
-	.item-list-textbox {
-		flex: 1;
-	}
-
-	.item-list-textbox .gr-input {
-		padding: 6px 10px;
-	}
-
-	.item-list-textbox textarea.gr-input {
-		resize: vertical;
-		min-height: 40px;
-	}
 </style>
-

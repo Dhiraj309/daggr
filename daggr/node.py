@@ -33,18 +33,6 @@ def _is_gradio_component(obj: Any) -> bool:
     )
 
 
-def _get_component_label(component: Any, fallback: str) -> str:
-    if hasattr(component, "label") and component.label:
-        return component.label
-    return fallback
-
-
-def _is_component_visible(component: Any) -> bool:
-    if hasattr(component, "visible"):
-        return component.visible
-    return True
-
-
 class Node(ABC):
     _id_counter = 0
 
@@ -96,12 +84,23 @@ class Node(ABC):
                 f"Use node._inputs.{underscore_ports[0]} or node._outputs.{underscore_ports[0]} to access."
             )
 
-    def _get_visible_output_components(self) -> List[Any]:
-        return [
-            comp
-            for port, comp in self._output_components.items()
-            if _is_component_visible(comp)
-        ]
+    def _process_inputs(self, inputs: Dict[str, Any]) -> None:
+        for port_name, value in inputs.items():
+            self._input_ports.append(port_name)
+            if is_port(value):
+                self._port_connections[port_name] = value
+            elif _is_gradio_component(value):
+                self._input_components[port_name] = value
+            else:
+                self._fixed_inputs[port_name] = value
+
+    def _process_outputs(self, outputs: Dict[str, Any]) -> None:
+        for port_name, component in outputs.items():
+            if component is None:
+                continue
+            self._output_ports.append(port_name)
+            if _is_gradio_component(component):
+                self._output_components[port_name] = component
 
     def __repr__(self):
         return f"{self.__class__.__name__}(name={self._name})"
@@ -135,24 +134,6 @@ class GradioNode(Node):
         self._process_outputs(outputs or {})
         self._validate_ports()
 
-    def _process_inputs(self, inputs: Dict[str, Any]):
-        for port_name, value in inputs.items():
-            self._input_ports.append(port_name)
-            if is_port(value):
-                self._port_connections[port_name] = value
-            elif _is_gradio_component(value):
-                self._input_components[port_name] = value
-            else:
-                self._fixed_inputs[port_name] = value
-
-    def _process_outputs(self, outputs: Dict[str, Any]):
-        for port_name, component in outputs.items():
-            if component is None:
-                continue
-            self._output_ports.append(port_name)
-            if _is_gradio_component(component):
-                self._output_components[port_name] = component
-
 
 class InferenceNode(Node):
     def __init__(
@@ -179,24 +160,6 @@ class InferenceNode(Node):
             self._output_ports = ["output"]
 
         self._validate_ports()
-
-    def _process_inputs(self, inputs: Dict[str, Any]):
-        for port_name, value in inputs.items():
-            self._input_ports.append(port_name)
-            if is_port(value):
-                self._port_connections[port_name] = value
-            elif _is_gradio_component(value):
-                self._input_components[port_name] = value
-            else:
-                self._fixed_inputs[port_name] = value
-
-    def _process_outputs(self, outputs: Dict[str, Any]):
-        for port_name, component in outputs.items():
-            if component is None:
-                continue
-            self._output_ports.append(port_name)
-            if _is_gradio_component(component):
-                self._output_components[port_name] = component
 
 
 class FnNode(Node):
@@ -229,17 +192,7 @@ class FnNode(Node):
         sig = inspect.signature(self._fn)
         self._input_ports = list(sig.parameters.keys())
 
-    def _process_inputs(self, inputs: Dict[str, Any]):
-        for port_name, value in inputs.items():
-            self._input_ports.append(port_name)
-            if is_port(value):
-                self._port_connections[port_name] = value
-            elif _is_gradio_component(value):
-                self._input_components[port_name] = value
-            else:
-                self._fixed_inputs[port_name] = value
-
-    def _process_outputs(self, outputs: Dict[str, Any]):
+    def _process_outputs(self, outputs: Dict[str, Any]) -> None:
         for port_name, component in outputs.items():
             if component is None:
                 continue
@@ -275,21 +228,3 @@ class InteractionNode(Node):
             self._name = f"interaction_{self._id}"
 
         self._validate_ports()
-
-    def _process_inputs(self, inputs: Dict[str, Any]):
-        for port_name, value in inputs.items():
-            self._input_ports.append(port_name)
-            if is_port(value):
-                self._port_connections[port_name] = value
-            elif _is_gradio_component(value):
-                self._input_components[port_name] = value
-            else:
-                self._fixed_inputs[port_name] = value
-
-    def _process_outputs(self, outputs: Dict[str, Any]):
-        for port_name, component in outputs.items():
-            if component is None:
-                continue
-            self._output_ports.append(port_name)
-            if _is_gradio_component(component):
-                self._output_components[port_name] = component

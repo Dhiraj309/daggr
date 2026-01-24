@@ -18,13 +18,14 @@ DAG-based workflow library connecting Gradio Spaces, ML models, and Python funct
 
 ### Core Files
 
-- **`graph.py`**: `Graph` class - holds nodes, edges, launches UI
+- **`graph.py`**: `Graph` class - holds nodes, edges, launches server
 - **`node.py`**: `GradioNode`, `FnNode`, `InferenceNode`, `InteractionNode`
-- **`port.py`**: `Port`, `scatter()`, `gather()` for parallel execution
+- **`port.py`**: `Port`, `ScatteredPort`, `GatheredPort` for parallel execution
 - **`edge.py`**: `Edge` class for node connections
 - **`executor.py`**: Executes workflow nodes
-- **`ui.py`**: Generates Gradio UI from graph
-- **`canvas-component/`**: Custom Svelte component for workflow visualization
+- **`server.py`**: FastAPI server with WebSocket for real-time UI updates
+- **`state.py`**: Session state persistence with SQLite
+- **`frontend/`**: Svelte frontend for workflow visualization
 
 ### Node Definition Pattern
 

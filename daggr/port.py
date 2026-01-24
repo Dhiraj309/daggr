@@ -81,14 +81,6 @@ class GatheredPort:
         return f"GatheredPort({self.port})"
 
 
-def scatter(port: Port, item_key: Optional[str] = None) -> ScatteredPort:
-    return ScatteredPort(port, item_key)
-
-
-def gather(port: Port) -> GatheredPort:
-    return GatheredPort(port)
-
-
 PortLike = Union[Port, ScatteredPort, GatheredPort]
 
 
