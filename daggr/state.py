@@ -237,7 +237,9 @@ class SessionState:
             return json.loads(result[0])
         return None
 
-    def get_result_by_index(self, session_id: str, node_name: str, index: int) -> Optional[Any]:
+    def get_result_by_index(
+        self, session_id: str, node_name: str, index: int
+    ) -> Optional[Any]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(

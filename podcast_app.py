@@ -2,7 +2,6 @@ import gradio as gr
 
 from daggr import FnNode, GradioNode, Graph, InferenceNode
 
-
 host_voice = GradioNode(
     space_or_url="abidlabs/tts",
     api_name="/generate_voice_design",
@@ -41,7 +40,9 @@ guest_voice = GradioNode(
 )
 
 
-def generate_dialogue(topic: str, host_voice: str, guest_voice: str) -> tuple[list, str]:
+def generate_dialogue(
+    topic: str, host_voice: str, guest_voice: str
+) -> tuple[list, str]:
     dialogue = [
         {"voice": host_voice, "text": "Hello, how are you?"},
         {"voice": guest_voice, "text": "I'm fine, thank you!"},
@@ -71,7 +72,7 @@ samples = InferenceNode(
     },
     outputs={
         "audio": gr.Audio(label="Sample"),
-    }
+    },
 )
 
 
@@ -91,7 +92,7 @@ full_audio = FnNode(
 
 graph = Graph(
     name="Podcast Generator",
-    nodes=[host_voice, guest_voice, dialogue, samples, full_audio]
+    nodes=[host_voice, guest_voice, dialogue, samples, full_audio],
 )
 
 graph.launch()

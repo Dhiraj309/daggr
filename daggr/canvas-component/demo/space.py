@@ -1,9 +1,90 @@
+import os
 
 import gradio as gr
 from app import demo as app
-import os
 
-_docs = {'CanvasComponent': {'description': 'A canvas component for displaying DAG-based workflows with nodes and edges.', 'members': {'__init__': {'value': {'type': 'dict | Callable | None', 'default': 'None', 'description': "Default graph data with 'name', 'nodes', and 'edges' keys."}, 'label': {'type': 'str | None', 'default': 'None', 'description': 'The label for this component.'}, 'show_label': {'type': 'bool | None', 'default': 'None', 'description': 'If True, will display label.'}, 'container': {'type': 'bool', 'default': 'True', 'description': 'If True, will place the component in a container.'}, 'scale': {'type': 'int | None', 'default': 'None', 'description': 'Relative size compared to adjacent Components.'}, 'min_width': {'type': 'int', 'default': '160', 'description': 'Minimum pixel width.'}, 'visible': {'type': 'bool | "hidden"', 'default': 'True', 'description': 'If False, component will be hidden.'}, 'elem_id': {'type': 'str | None', 'default': 'None', 'description': 'An optional string for the HTML DOM id.'}, 'elem_classes': {'type': 'list[str] | str | None', 'default': 'None', 'description': 'An optional list of strings for CSS classes.'}, 'render': {'type': 'bool', 'default': 'True', 'description': 'If False, component will not be rendered.'}, 'height': {'type': 'int | str | None', 'default': '"100vh"', 'description': 'The height of the canvas.'}}, 'postprocess': {'value': {'type': 'dict | None', 'description': None}}, 'preprocess': {'return': {'type': 'dict | None', 'description': None}, 'value': None}}, 'events': {'change': {'type': None, 'default': None, 'description': 'Triggered when the value of the CanvasComponent changes either because of user input (e.g. a user types in a textbox) OR because of a function update (e.g. an image receives a value from the output of an event trigger). See `.input()` for a listener that is only triggered by user input.'}, 'input': {'type': None, 'default': None, 'description': 'This listener is triggered when the user changes the value of the CanvasComponent.'}}}, '__meta__': {'additional_interfaces': {}, 'user_fn_refs': {'CanvasComponent': []}}}
+_docs = {
+    "CanvasComponent": {
+        "description": "A canvas component for displaying DAG-based workflows with nodes and edges.",
+        "members": {
+            "__init__": {
+                "value": {
+                    "type": "dict | Callable | None",
+                    "default": "None",
+                    "description": "Default graph data with 'name', 'nodes', and 'edges' keys.",
+                },
+                "label": {
+                    "type": "str | None",
+                    "default": "None",
+                    "description": "The label for this component.",
+                },
+                "show_label": {
+                    "type": "bool | None",
+                    "default": "None",
+                    "description": "If True, will display label.",
+                },
+                "container": {
+                    "type": "bool",
+                    "default": "True",
+                    "description": "If True, will place the component in a container.",
+                },
+                "scale": {
+                    "type": "int | None",
+                    "default": "None",
+                    "description": "Relative size compared to adjacent Components.",
+                },
+                "min_width": {
+                    "type": "int",
+                    "default": "160",
+                    "description": "Minimum pixel width.",
+                },
+                "visible": {
+                    "type": 'bool | "hidden"',
+                    "default": "True",
+                    "description": "If False, component will be hidden.",
+                },
+                "elem_id": {
+                    "type": "str | None",
+                    "default": "None",
+                    "description": "An optional string for the HTML DOM id.",
+                },
+                "elem_classes": {
+                    "type": "list[str] | str | None",
+                    "default": "None",
+                    "description": "An optional list of strings for CSS classes.",
+                },
+                "render": {
+                    "type": "bool",
+                    "default": "True",
+                    "description": "If False, component will not be rendered.",
+                },
+                "height": {
+                    "type": "int | str | None",
+                    "default": '"100vh"',
+                    "description": "The height of the canvas.",
+                },
+            },
+            "postprocess": {"value": {"type": "dict | None", "description": None}},
+            "preprocess": {
+                "return": {"type": "dict | None", "description": None},
+                "value": None,
+            },
+        },
+        "events": {
+            "change": {
+                "type": None,
+                "default": None,
+                "description": "Triggered when the value of the CanvasComponent changes either because of user input (e.g. a user types in a textbox) OR because of a function update (e.g. an image receives a value from the output of an event trigger). See `.input()` for a listener that is only triggered by user input.",
+            },
+            "input": {
+                "type": None,
+                "default": None,
+                "description": "This listener is triggered when the user changes the value of the CanvasComponent.",
+            },
+        },
+    },
+    "__meta__": {"additional_interfaces": {}, "user_fn_refs": {"CanvasComponent": []}},
+}
 
 abs_path = os.path.join(os.path.dirname(__file__), "css.css")
 
@@ -17,7 +98,7 @@ with gr.Blocks(
     ),
 ) as demo:
     gr.Markdown(
-"""
+        """
 # `gradio_canvas_component`
 
 <div style="display: flex; gap: 7px;">
@@ -25,10 +106,13 @@ with gr.Blocks(
 </div>
 
 makes a canvas to display a DAG
-""", elem_classes=["md-custom"], header_links=True)
+""",
+        elem_classes=["md-custom"],
+        header_links=True,
+    )
     app.render()
     gr.Markdown(
-"""
+        """
 ## Installation
 
 ```bash
@@ -54,25 +138,28 @@ if __name__ == "__main__":
     demo.launch()
 
 ```
-""", elem_classes=["md-custom"], header_links=True)
+""",
+        elem_classes=["md-custom"],
+        header_links=True,
+    )
 
-
-    gr.Markdown("""
+    gr.Markdown(
+        """
 ## `CanvasComponent`
 
 ### Initialization
-""", elem_classes=["md-custom"], header_links=True)
+""",
+        elem_classes=["md-custom"],
+        header_links=True,
+    )
 
     gr.ParamViewer(value=_docs["CanvasComponent"]["members"]["__init__"], linkify=[])
 
-
     gr.Markdown("### Events")
-    gr.ParamViewer(value=_docs["CanvasComponent"]["events"], linkify=['Event'])
+    gr.ParamViewer(value=_docs["CanvasComponent"]["events"], linkify=["Event"])
 
-
-
-
-    gr.Markdown("""
+    gr.Markdown(
+        """
 
 ### User function
 
@@ -91,12 +178,14 @@ def predict(
 ) -> dict | None:
     return value
 ```
-""", elem_classes=["md-custom", "CanvasComponent-user-fn"], header_links=True)
+""",
+        elem_classes=["md-custom", "CanvasComponent-user-fn"],
+        header_links=True,
+    )
 
-
-
-
-    demo.load(None, js=r"""function() {
+    demo.load(
+        None,
+        js=r"""function() {
     const refs = {};
     const user_fn_refs = {
           CanvasComponent: [], };
@@ -130,6 +219,7 @@ def predict(
     })
 }
 
-""")
+""",
+    )
 
 demo.launch()

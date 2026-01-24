@@ -658,7 +658,9 @@ class UIGenerator:
             if run_to_node:
                 canvas_data["run_to_node"] = None
                 canvas_data["run_id"] = None
-                for result in self._execute_to_node_streaming(canvas_data, run_to_node, run_id):
+                for result in self._execute_to_node_streaming(
+                    canvas_data, run_to_node, run_id
+                ):
                     yield result
                 return
 
@@ -688,7 +690,9 @@ class UIGenerator:
                     to_visit.append(source)
         return list(ancestors)
 
-    def _execute_to_node_streaming(self, canvas_data: dict, target_node: str, run_id: str):
+    def _execute_to_node_streaming(
+        self, canvas_data: dict, target_node: str, run_id: str
+    ):
         from daggr.node import InteractionNode
 
         print(f"[RUN] Executing to node: {target_node}")
@@ -724,10 +728,12 @@ class UIGenerator:
 
         node_results = {}
         node_statuses = {}
-        
+
         # Get selected result indices from frontend (which result the user has selected for each node)
-        selected_results = canvas_data.get("selected_results", {}) if canvas_data else {}
-        
+        selected_results = (
+            canvas_data.get("selected_results", {}) if canvas_data else {}
+        )
+
         # Load existing results from session state to skip already-completed nodes
         # Use the selected index if provided, otherwise use the latest result
         existing_results = {}
@@ -741,7 +747,7 @@ class UIGenerator:
                     cached = self.state.get_latest_result(self.session_id, node_name)
                 if cached is not None:
                     existing_results[node_name] = cached
-        
+
         # Pre-populate executor with existing results so downstream nodes can use them
         self.executor.results = dict(existing_results)
 
@@ -753,7 +759,7 @@ class UIGenerator:
                     node_results[node_name] = existing_results[node_name]
                     node_statuses[node_name] = "completed"
                     continue
-                
+
                 print(f"[RUN] {node_name}...")
                 node_statuses[node_name] = "running"
                 user_input = entry_inputs.get(node_name, {})
