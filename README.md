@@ -33,12 +33,12 @@ from daggr import Graph, FnNode, GradioNode
 voice = GradioNode(
     space_or_url="abidlabs/tts",
     api_name="/generate_voice_design",
-    inputs={
+    inputs={ # 3 input ports
         "voice_description": gr.Textbox(label="Voice", value="Professional voice..."),  # Creates an input node with a Gradio component
         "language": "Auto",  # Fixed value (no UI)
         "text": "Hello world!",
     },
-    outputs={
+    outputs={ # 1 output port
         "audio": gr.Audio(label="Generated Voice"),
     },
 )
