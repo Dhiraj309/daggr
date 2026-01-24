@@ -1,180 +1,92 @@
-"""
-Podcast Generator - Prefect-like API for daggr
-
-This shows what a cleaner, decorator-based API could look like.
-"""
 import gradio as gr
-from daggr import node, graph
-from gradio_client import Client
-
-
-# =============================================================================
-# STEP 1: Wrap external clients as nodes
-# =============================================================================
-
-tts = node(
-    Client("abidlabs/tts"),
-    api_name="/generate_voice_design",
-)
-
-chatterbox = node(
-    Client("ResembleAI/chatterbox"),
-    api_name="/generate",
-)
-
-
-# =============================================================================
-# STEP 2: Define custom function nodes with @node decorator
-# =============================================================================
-
-@node
-def generate_dialogue(topic: str, host_voice: str, guest_voice: str) -> tuple[list, str]:
-    """
-    Generates the dialogue script for a podcast episode.
-    In reality, this would call an LLM.
-    """
-    dialogue = [
-        {"speaker": "host", "voice": host_voice, "text": f"Welcome to today's episode about {topic}!"},
-        {"speaker": "guest", "voice": guest_voice, "text": "Thanks for having me, excited to dive in!"},
-        {"speaker": "host", "voice": host_voice, "text": "Let's start with the basics..."},
-        {"speaker": "guest", "voice": guest_voice, "text": "Absolutely, so the key thing to understand is..."},
-        {"speaker": "host", "voice": host_voice, "text": "That's a great point. Thanks for joining us!"},
-    ]
-    
-    html = "<div class='dialogue'>"
-    for line in dialogue:
-        html += f"<p><strong>{line['speaker'].title()}:</strong> {line['text']}</p>"
-    html += "</div>"
-    
-    return dialogue, html
-
-
-@node
-def combine_audio(clips: list[str]) -> str:
-    """
-    Combines multiple audio clips into a single file.
-    In reality, this would use pydub or similar.
-    """
-    if not clips:
-        return None
-    return clips[0]
-
-
-# =============================================================================
-# STEP 3: Define the workflow with @graph decorator
-# =============================================================================
-
-@graph
-def podcast_generator(
-    host_desc: str = gr.Textbox(
-        label="Host Voice Description",
-        value="Deep, warm British male voice. Professional and authoritative but friendly.",
-        lines=3,
-    ),
-    guest_desc: str = gr.Textbox(
-        label="Guest Voice Description",
-        value="Energetic young American female voice. Enthusiastic and knowledgeable.",
-        lines=3,
-    ),
-    topic: str = gr.Textbox(
-        label="Episode Topic",
-        value="The future of AI in healthcare",
-        lines=2,
-    ),
-) -> tuple[gr.HTML, gr.Audio]:
-    """
-    Generates a complete podcast episode from voice descriptions and a topic.
-    """
-    
-    # Generate voice profiles for host and guest
-    host_voice = tts(
-        voice_description=host_desc,
-        language="Auto",
-        text="Hello, I'm your host for today's episode.",
-    )
-    
-    guest_voice = tts(
-        voice_description=guest_desc,
-        language="Auto",
-        text="Hi everyone, great to be here!",
-    )
-    
-    # Generate the dialogue script (returns list of lines + HTML preview)
-    dialogue, script_html = generate_dialogue(
-        topic=topic,
-        host_voice=host_voice.audio,
-        guest_voice=guest_voice.audio,
-    )
-    
-    # SCATTER: Generate audio for each line of dialogue
-    # .map() runs chatterbox once per item in dialogue
-    line_audio = chatterbox.map(
-        audio_prompt=dialogue.each["voice"],
-        text=dialogue.each["text"],
-    )
-    
-    # GATHER: Combine all audio clips into final episode
-    final_audio = combine_audio(line_audio.audio.all())
-    
-    # Return outputs (infers gr.HTML and gr.Audio from type hints)
-    return (
-        gr.HTML(script_html, label="Episode Script"),
-        gr.Audio(final_audio, label="Full Episode"),
-    )
-
-
-# =============================================================================
-# STEP 4: Launch the app
-# =============================================================================
-
-if __name__ == "__main__":
-    podcast_generator.launch()
-
-
-# =============================================================================
-# COMPARISON: Same workflow with current explicit API
-# =============================================================================
-"""
-# Current API (more verbose but explicit):
 
 from daggr import FnNode, GradioNode, Graph, InferenceNode
+
 
 host_voice = GradioNode(
     space_or_url="abidlabs/tts",
     api_name="/generate_voice_design",
     inputs={
-        "voice_description": gr.Textbox(label="Host Voice Description", ...),
+        "voice_description": gr.Textbox(
+            label="Host Voice Description",
+            value="Deep British voice that is very professional and authoritative...",
+            lines=3,
+        ),
         "language": "Auto",
-        "text": "Hello, I'm your host...",
+        "text": "Hi! I'm the host of podcast. It's going to be a great episode!",
     },
-    outputs={"audio": gr.Audio(label="Host Voice"), ...},
+    outputs={
+        "audio": gr.Audio(label="Host Voice"),
+        "status": gr.Text(visible=False),
+    },
 )
 
-guest_voice = GradioNode(...)
+
+guest_voice = GradioNode(
+    space_or_url="abidlabs/tts",
+    api_name="/generate_voice_design",
+    inputs={
+        "voice_description": gr.Textbox(
+            label="Guest Voice Description",
+            value="Energetic, friendly young voice with American accent...",
+            lines=3,
+        ),
+        "language": "Auto",
+        "text": "Hi! I'm the guest of podcast. Super excited to be here!",
+    },
+    outputs={
+        "audio": gr.Audio(label="Guest Voice"),
+        "status": gr.Text(visible=False),
+    },
+)
+
+
+def generate_dialogue(topic: str, host_voice: str, guest_voice: str) -> tuple[list, str]:
+    dialogue = [
+        {"voice": host_voice, "text": "Hello, how are you?"},
+        {"voice": guest_voice, "text": "I'm fine, thank you!"},
+    ]
+    html = "Hello <strong>friend</strong>"
+    return dialogue, html
+
 
 dialogue = FnNode(
     fn=generate_dialogue,
     inputs={
-        "topic": gr.Textbox(label="Topic", ...),
+        "topic": gr.Textbox(label="Topic", value="AI in healthcare..."),
         "host_voice": host_voice.audio,
         "guest_voice": guest_voice.audio,
     },
-    outputs={"dialogue": gr.JSON(...), "html": gr.HTML(...)},
+    outputs={
+        "json": gr.JSON(label="Dialogue", visible=False),
+        "html": gr.HTML(label="Dialogue"),
+    },
 )
 
 samples = InferenceNode(
     model="ResembleAI/chatterbox",
     inputs={
-        "audio_prompt": dialogue.dialogue.each["voice"],
-        "text": dialogue.dialogue.each["text"],
+        "text": dialogue.json.each["text"],
+        "audio": dialogue.json.each["voice"],
     },
-    outputs={"audio": gr.Audio(...)},
+    outputs={
+        "audio": gr.Audio(label="Sample"),
+    }
 )
 
+
+def combine_audio_files(audio_files: list[str]) -> str:
+    return audio_files[0] if audio_files else None
+
+
 full_audio = FnNode(
-    fn=combine_audio,
-    inputs={"clips": samples.audio.all()},
-    outputs={"audio": gr.Audio(label="Full Episode")},
+    fn=combine_audio_files,
+    inputs={
+        "audio_files": samples.audio.all(),
+    },
+    outputs={
+        "audio": gr.Audio(label="Full Audio"),
+    },
 )
 
 graph = Graph(
@@ -183,4 +95,3 @@ graph = Graph(
 )
 
 graph.launch()
-"""
