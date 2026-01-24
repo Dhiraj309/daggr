@@ -34,7 +34,7 @@ voice = GradioNode(
     space_or_url="abidlabs/tts",
     api_name="/generate_voice_design",
     inputs={
-        "voice_description": gr.Textbox(label="Voice", value="Professional voice..."),
+        "voice_description": gr.Textbox(label="Voice", value="Professional voice..."),  # Creates an input node with a Gradio component
         "language": "Auto",  # Fixed value (no UI)
         "text": "Hello world!",
     },
