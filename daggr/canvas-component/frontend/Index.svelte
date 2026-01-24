@@ -22,6 +22,14 @@
 		value?: any;
 	}
 
+	interface MapItem {
+		index: number;
+		preview: string;
+		output: string | null;
+		is_audio_output: boolean;
+		status?: string;
+	}
+
 	interface GraphNode {
 		id: string;
 		name: string;
@@ -35,6 +43,9 @@
 		status: string;
 		is_output_node: boolean;
 		is_input_node: boolean;
+		is_map_node?: boolean;
+		map_items?: MapItem[];
+		map_item_count?: number;
 	}
 
 	interface GraphEdge {
@@ -43,6 +54,8 @@
 		from_port: string;
 		to_node: string;
 		to_port: string;
+		is_scattered?: boolean;
+		is_gathered?: boolean;
 	}
 
 	interface CanvasData {
@@ -91,6 +104,9 @@
 
 	// Track which result index is selected per node
 	let selectedResultIndex = $state<Record<string, number>>({});
+
+	// Track which map nodes are expanded (showing all items)
+	let expandedMapNodes = $state<Record<string, boolean>>({});
 
 	// Computed running counts from pending runs
 	let runningCounts = $derived.by(() => {
@@ -174,7 +190,13 @@
 
 	// Compute all edge paths reactively
 	let edgePaths = $derived.by(() => {
-		const paths: { id: string; d: string }[] = [];
+		const paths: { 
+			id: string; 
+			d: string; 
+			is_scattered: boolean; 
+			is_gathered: boolean;
+			forkPaths?: string[];
+		}[] = [];
 		
 		for (const edge of edges) {
 			const fromNode = nodeMap.get(edge.from_node);
@@ -198,8 +220,41 @@
 			const dx = Math.abs(x2 - x1);
 			const cp = Math.max(dx * 0.4, 50);
 
-			const d = `M ${x1} ${y1} C ${x1 + cp} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
-			paths.push({ id: edge.id, d });
+			const is_scattered = edge.is_scattered || false;
+			const is_gathered = edge.is_gathered || false;
+
+			let forkPaths: string[] = [];
+
+			if (is_scattered) {
+				// Fork at the END - edge splits into 3 lines near target
+				const forkStart = x2 - 30;
+				const forkSpread = 8;
+				// Main path stops before the fork
+				const d = `M ${x1} ${y1} C ${x1 + cp} ${y1}, ${forkStart - 20} ${y2}, ${forkStart} ${y2}`;
+				// Fork lines spread out to target
+				forkPaths = [
+					`M ${forkStart} ${y2} L ${x2} ${y2 - forkSpread}`,
+					`M ${forkStart} ${y2} L ${x2} ${y2}`,
+					`M ${forkStart} ${y2} L ${x2} ${y2 + forkSpread}`,
+				];
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+			} else if (is_gathered) {
+				// Fork at the START - 3 lines converge from source
+				const forkEnd = x1 + 30;
+				const forkSpread = 8;
+				// Fork lines from source
+				forkPaths = [
+					`M ${x1} ${y1 - forkSpread} L ${forkEnd} ${y1}`,
+					`M ${x1} ${y1} L ${forkEnd} ${y1}`,
+					`M ${x1} ${y1 + forkSpread} L ${forkEnd} ${y1}`,
+				];
+				// Main path continues from fork point
+				const d = `M ${forkEnd} ${y1} C ${forkEnd + cp - 30} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+			} else {
+				const d = `M ${x1} ${y1} C ${x1 + cp} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
+				paths.push({ id: edge.id, d, is_scattered, is_gathered });
+			}
 		}
 		
 		return paths;
@@ -271,7 +326,7 @@
 
 	function handleWheel(e: WheelEvent) {
 		e.preventDefault();
-		const delta = e.deltaY > 0 ? 0.9 : 1.1;
+		const delta = e.deltaY > 0 ? 0.97 : 1.03;
 		transform.scale = Math.max(0.2, Math.min(3, transform.scale * delta));
 	}
 
@@ -405,6 +460,28 @@
 
 	// Zoom percentage display
 	let zoomPercent = $derived(Math.round(transform.scale * 100));
+
+	// Toggle map node expansion
+	function toggleMapExpand(e: MouseEvent, nodeName: string) {
+		e.stopPropagation();
+		expandedMapNodes[nodeName] = !expandedMapNodes[nodeName];
+	}
+
+	// Replay individual map item
+	function handleReplayItem(e: MouseEvent, nodeName: string, itemIndex: number) {
+		e.stopPropagation();
+		// TODO: Implement individual item replay via backend
+		console.log(`Replay item ${itemIndex} for node ${nodeName}`);
+	}
+
+	// Get visible map items (first 3 or all if expanded)
+	function getVisibleMapItems(node: GraphNode): MapItem[] {
+		const items = node.map_items || [];
+		if (expandedMapNodes[node.name] || items.length <= 3) {
+			return items;
+		}
+		return items.slice(0, 3);
+	}
 </script>
 
 <Block
@@ -447,7 +524,15 @@
 			<!-- Edges SVG (rendered first so it's behind nodes) -->
 			<svg class="edges-svg">
 				{#each edgePaths as edge (edge.id)}
-					<path d={edge.d} class="edge-path" />
+					<path 
+						d={edge.d} 
+						class="edge-path"
+					/>
+					{#if edge.forkPaths}
+						{#each edge.forkPaths as forkD}
+							<path d={forkD} class="edge-path edge-fork" />
+						{/each}
+					{/if}
 				{/each}
 			</svg>
 
@@ -466,11 +551,20 @@
 								class="run-btn"
 								class:running={runningCounts[node.name] > 0}
 								onclick={(e) => handleRunToNode(e, node.name)}
-								title="Run to here"
+								title={node.is_map_node ? "Run all items" : "Run to here"}
 								role="button"
 								tabindex="0"
 							>
-								▶
+								{#if node.is_map_node}
+									<svg class="run-icon-svg run-icon-map" viewBox="0 0 14 12" fill="currentColor">
+										<path d="M2 1 L12 6 L2 11 Z" opacity="0.5" transform="translate(-2, 0)"/>
+										<path d="M2 1 L12 6 L2 11 Z" transform="translate(2, 0)"/>
+									</svg>
+								{:else}
+									<svg class="run-icon-svg" viewBox="0 0 10 12" fill="currentColor">
+										<path d="M1 1 L9 6 L1 11 Z"/>
+									</svg>
+								{/if}
 								{#if runningCounts[node.name] > 0}
 									<span class="run-badge">{runningCounts[node.name]}</span>
 								{/if}
@@ -610,6 +704,39 @@
 							</div>
 						{/if}
 					{/if}
+
+					{#if node.is_map_node && node.map_items && node.map_items.length > 0}
+						<div class="map-items-section">
+							<div class="map-items-header">
+								<span class="map-items-title">Items ({node.map_items.length})</span>
+							</div>
+							<div class="map-items-list">
+								{#each getVisibleMapItems(node) as item (item.index)}
+									<div class="map-item" class:has-output={item.output}>
+										<span class="map-item-index">{item.index}.</span>
+										<span class="map-item-preview" title={item.preview}>
+											{item.preview.length > 25 ? item.preview.slice(0, 25) + '...' : item.preview}
+										</span>
+										<button 
+											class="map-item-replay"
+											onclick={(e) => handleReplayItem(e, node.name, item.index)}
+											title={item.output ? "Replay this item" : "Run this item"}
+										>
+											{item.output ? '↻' : '▶'}
+										</button>
+									</div>
+								{/each}
+							</div>
+							{#if node.map_items.length > 3}
+								<button 
+									class="map-expand-btn"
+									onclick={(e) => toggleMapExpand(e, node.name)}
+								>
+									{expandedMapNodes[node.name] ? '▲ Show less' : `▼ Show all (${node.map_items.length})`}
+								</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -725,6 +852,10 @@
 		stroke-linecap: round;
 	}
 
+	.edge-fork {
+		stroke-width: 2;
+	}
+
 	/* Node */
 	.node {
 		position: absolute;
@@ -785,6 +916,17 @@
 
 	.run-btn.running {
 		animation: pulse 1.5s ease-in-out infinite;
+	}
+
+	.run-icon-svg {
+		width: 10px;
+		height: 10px;
+		display: block;
+	}
+
+	.run-icon-svg.run-icon-map {
+		width: 14px;
+		height: 12px;
 	}
 
 	@keyframes pulse {
@@ -1097,5 +1239,107 @@
 		font-family: 'SF Mono', Monaco, monospace;
 		min-width: 32px;
 		text-align: center;
+	}
+
+	/* Map items section */
+	.map-items-section {
+		border-top: 1px solid rgba(168, 85, 247, 0.2);
+		background: rgba(168, 85, 247, 0.03);
+	}
+
+	.map-items-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 10px;
+		border-bottom: 1px solid rgba(168, 85, 247, 0.1);
+	}
+
+	.map-items-title {
+		font-size: 10px;
+		font-weight: 600;
+		color: #a855f7;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.map-items-list {
+		max-height: 150px;
+		overflow-y: auto;
+	}
+
+	.map-item {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 10px;
+		border-bottom: 1px solid rgba(168, 85, 247, 0.06);
+		transition: background 0.15s;
+	}
+
+	.map-item:hover {
+		background: rgba(168, 85, 247, 0.08);
+	}
+
+	.map-item:last-child {
+		border-bottom: none;
+	}
+
+	.map-item-index {
+		font-size: 10px;
+		font-weight: 600;
+		color: #a855f7;
+		min-width: 18px;
+		font-family: 'SF Mono', Monaco, monospace;
+	}
+
+	.map-item-preview {
+		flex: 1;
+		font-size: 10px;
+		color: #888;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.map-item.has-output .map-item-preview {
+		color: #aaa;
+	}
+
+	.map-item-replay {
+		width: 20px;
+		height: 20px;
+		border: none;
+		background: rgba(168, 85, 247, 0.15);
+		color: #a855f7;
+		font-size: 10px;
+		border-radius: 4px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.15s;
+		flex-shrink: 0;
+	}
+
+	.map-item-replay:hover {
+		background: rgba(168, 85, 247, 0.3);
+	}
+
+	.map-expand-btn {
+		width: 100%;
+		padding: 6px 10px;
+		border: none;
+		background: transparent;
+		color: #a855f7;
+		font-size: 10px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: background 0.15s;
+		border-top: 1px solid rgba(168, 85, 247, 0.1);
+	}
+
+	.map-expand-btn:hover {
+		background: rgba(168, 85, 247, 0.1);
 	}
 </style>

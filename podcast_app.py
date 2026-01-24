@@ -40,6 +40,7 @@ guest_voice = GradioNode(
 )
 
 
+# Currently mocked. But this would be an LLM call.
 def generate_dialogue(
     topic: str, host_voice: str, guest_voice: str
 ) -> tuple[list, str]:
@@ -47,7 +48,7 @@ def generate_dialogue(
         {"voice": host_voice, "text": "Hello, how are you?"},
         {"voice": guest_voice, "text": "I'm fine, thank you!"},
     ]
-    html = "Hello <strong>friend</strong>"
+    html = "<strong>Host</strong>: Hello, how are you?<br><strong>Guest</strong>: I'm fine, thank you!"
     return dialogue, html
 
 

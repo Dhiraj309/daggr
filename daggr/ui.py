@@ -21,10 +21,6 @@ class UIGenerator:
         self.session_id: Optional[str] = None
 
     def _get_node_type(self, node, node_name: str) -> str:
-        if self._has_scattered_input(node_name):
-            base_type = self._get_base_node_type(node)
-            return f"MAP:{base_type}"
-
         return self._get_base_node_type(node)
 
     def _get_base_node_type(self, node) -> str:
@@ -159,8 +155,9 @@ class UIGenerator:
             return []
 
         item_output_type = "text"
-        if scattered_edge.item_output:
-            item_output_type = self._get_component_type(scattered_edge.item_output)
+        if scattered_edge.item_key:
+            if "audio" in scattered_edge.item_key.lower():
+                item_output_type = "audio"
 
         items = []
         if result and isinstance(result, dict) and "_scattered_results" in result:
@@ -407,8 +404,9 @@ class UIGenerator:
 
             item_output_type = "text"
             scattered_edge = self._get_scattered_edge(node_name)
-            if scattered_edge and scattered_edge.item_output:
-                item_output_type = self._get_component_type(scattered_edge.item_output)
+            if scattered_edge and scattered_edge.item_key:
+                if "audio" in scattered_edge.item_key.lower():
+                    item_output_type = "audio"
 
             is_output = self._is_output_node(node_name)
             is_entry = self.graph._nx_graph.in_degree(node_name) == 0
@@ -450,6 +448,8 @@ class UIGenerator:
                         "-", "_"
                     ),
                     "to_port": edge.target_port,
+                    "is_scattered": edge.is_scattered,
+                    "is_gathered": edge.is_gathered,
                 }
             )
 
