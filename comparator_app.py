@@ -1,6 +1,6 @@
 import gradio as gr
 
-from daggr import GradioNode
+from daggr import GradioNode, Graph
 
 voice_description = gr.Textbox(
     label="Host Voice Description",
@@ -10,14 +10,15 @@ voice_description = gr.Textbox(
 
 text_to_speak = gr.Textbox(
     label="Text to Speak",
-    value="Hi! I'm the host of podcast. It's going to be a great episode!",
+    value="Hi! I'm the host of a podcast. It's going to be a great episode!",
+    lines=3,
 )
 
 qwen_voice = GradioNode(
     space_or_url="Qwen/Qwen3-TTS",
     api_name="/generate_voice_design",
     inputs={
-        "voice_description": textbox,
+        "voice_description": voice_description,
         "language": "Auto",
         "text": text_to_speak,
     },
@@ -43,24 +44,9 @@ maya_voice = GradioNode(
     },
 )
 
-
-from gradio_client import Client
-
-client = Client("")
-result = client.predict(
-    preset_name="Male American",
-    description="Realistic male voice in the 20s age with a american accent. High pitch, raspy timbre, brisk pacing, neutral tone delivery at medium intensity, viral_content domain, short_form_narrator role, neutral delivery",
-    text="And of course, the so-called easy hack didn't work at all.  What a surprise. <sigh>",
-    temperature=0.4,
-    max_tokens=1500,
-    api_name="/",
-)
-print(result)
-
-
 graph = Graph(
     name="Voice Designing Comparator",
-    nodes=[],
+    nodes=[qwen_voice, maya_voice],
 )
 
 graph.launch()

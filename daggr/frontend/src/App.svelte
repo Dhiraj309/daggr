@@ -23,6 +23,7 @@
 	let nodeResults = $state<Record<string, any[]>>({});
 	let selectedResultIndex = $state<Record<string, number>>({});
 	let itemListValues = $state<Record<string, Record<number, Record<string, any>>>>({});
+	let nodeExecutionTimes = $state<Record<string, number>>({});
 
 	const globalProcessedSet = new Set<string>();
 
@@ -144,6 +145,10 @@
 						}
 					}
 				}
+			}
+			
+			if (completedNode && data.execution_time_ms != null) {
+				nodeExecutionTimes[completedNode] = data.execution_time_ms;
 			}
 			
 			if (data.nodes) {
@@ -504,6 +509,18 @@
 	}
 
 	let zoomPercent = $derived(Math.round(transform.scale * 100));
+
+	function formatExecutionTime(ms: number): string {
+		if (ms < 1000) {
+			return `${Math.round(ms)}ms`;
+		} else if (ms < 60000) {
+			return `${(ms / 1000).toFixed(1)}s`;
+		} else {
+			const mins = Math.floor(ms / 60000);
+			const secs = ((ms % 60000) / 1000).toFixed(0);
+			return `${mins}m ${secs}s`;
+		}
+	}
 </script>
 
 <div 
@@ -541,10 +558,14 @@
 
 		{#each nodes as node (node.id)}
 			{@const componentsToRender = getComponentsToRender(node)}
+			{@const execTime = nodeExecutionTimes[node.name]}
 			<div 
 				class="node"
 				style="left: {node.x}px; top: {node.y}px; width: {NODE_WIDTH}px;"
 			>
+				{#if execTime != null}
+					<div class="exec-time">{formatExecutionTime(execTime)}</div>
+				{/if}
 				<div class="node-header">
 					<span class="type-badge" style={getBadgeStyle(node.type)}>{node.type}</span>
 					<span class="node-name">{node.name}</span>
@@ -800,7 +821,17 @@
 		border: 1px solid rgba(249, 115, 22, 0.2);
 		border-radius: 10px;
 		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-		overflow: hidden;
+		overflow: visible;
+	}
+
+	.exec-time {
+		position: absolute;
+		top: -18px;
+		right: 4px;
+		font-size: 10px;
+		font-weight: 500;
+		color: #666;
+		font-family: 'SF Mono', Monaco, monospace;
 	}
 
 	.node-header {

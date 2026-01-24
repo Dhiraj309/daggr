@@ -426,13 +426,30 @@ class DaggrServer:
         synthetic_edges: List[Dict[str, Any]] = []
         input_node_positions: Dict[str, tuple] = {}
 
+        component_to_input_node: Dict[int, str] = {}
         creation_order = 0
         for node_name in self.graph.nodes:
             node = self.graph.nodes[node_name]
             if node._input_components:
                 for idx, (port_name, comp) in enumerate(node._input_components.items()):
+                    comp_id = id(comp)
+
+                    if comp_id in component_to_input_node:
+                        existing_input_node = component_to_input_node[comp_id]
+                        existing_input_id = existing_input_node.replace(" ", "_").replace("-", "_")
+                        synthetic_edges.append(
+                            {
+                                "from_node": existing_input_id,
+                                "from_port": "value",
+                                "to_node": node_name.replace(" ", "_").replace("-", "_"),
+                                "to_port": port_name,
+                            }
+                        )
+                        continue
+
                     input_node_name = f"{node_name}__{port_name}"
                     input_node_id = input_node_name.replace(" ", "_").replace("-", "_")
+                    component_to_input_node[comp_id] = input_node_name
 
                     comp_data = self._serialize_component(comp, "value")
                     label = comp_data["props"].get("label") or port_name
@@ -830,9 +847,13 @@ class DaggrServer:
                 node_statuses[node_name] = "running"
                 user_input = entry_inputs.get(node_name, {})
 
+                import time
+
+                start_time = time.time()
                 result = await asyncio.to_thread(
                     self.executor.execute_node, node_name, user_input
                 )
+                elapsed_ms = (time.time() - start_time) * 1000
 
                 result = self._apply_item_list_edits(
                     node_name, result, item_list_values
@@ -848,6 +869,7 @@ class DaggrServer:
                 graph_data["type"] = "node_complete"
                 graph_data["completed_node"] = node_name
                 graph_data["run_id"] = run_id
+                graph_data["execution_time_ms"] = elapsed_ms
                 yield graph_data
 
         except Exception as e:
