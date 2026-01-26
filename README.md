@@ -100,70 +100,70 @@ Don't use Daggr when:
 
 ## How It Works
 
+A Daggr workflow consists of **nodes** connected in a directed graph. Each node represents a computation: a Gradio Space API call, an inference call to a model, or a Python function.
+
+Each node has **input ports** and **output ports**, which correspond to the node's parameters and return values. Ports are how data flows between nodes.
+
+**Input ports** can be connected to:
+- A previous node's output port → creates an edge, data flows automatically
+- A Gradio component → creates a standalone input in the UI
+- A fixed value → passed directly, doesn't appear in UI
+- A callable → called each time the node runs (useful for random seeds)
+
+**Output ports** can be connected to:
+- A Gradio component → displays the output in the node's card
+- `None` → output is hidden but can still connect to downstream nodes
+
+### Node Types
+
+- **`GradioNode`**: Calls a Gradio Space API endpoint
+- **`FnNode`**: Runs a Python function
+- **`InferenceNode`**: Calls a model via [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index)
+
 ### Input Types
 
-Each node's `inputs` dict accepts three types of values:
+Each node's `inputs` dict accepts four types of values:
 
 | Type | Example | Result |
 |------|---------|--------|
 | **Gradio component** | `gr.Textbox(label="Topic")` | Creates UI input |
 | **Port reference** | `other_node.output_name` | Connects nodes |
 | **Fixed value** | `"Auto"` or `42` | Constant, no UI |
+| **Callable** | `random.random` | Called each run, no UI |
 
-### Node Types
+### Output Types
 
-- **`GradioNode`**: Calls a Gradio Space API endpoint
-- **`FnNode`**: Runs a Python function
+Each node's `outputs` dict accepts two types of values:
 
-## Scatter / Gather (Map over lists)
+| Type | Example | Result |
+|------|---------|--------|
+| **Gradio component** | `gr.Image(label="Result")` | Displays output in node card |
+| **None** | `None` | Hidden, but can connect to downstream nodes |
+
+### Scatter / Gather
 
 When a node outputs a list and you want to process each item individually, use `.each` to scatter and `.all()` to gather:
 
 ```python
-def generate_script(topic: str) -> list[dict]:
-    # Returns a list of dialogue lines
-    return [
-        {"speaker": "host", "text": "Welcome!"},
-        {"speaker": "guest", "text": "Thanks for having me!"},
-    ]
+script = FnNode(fn=generate_script, inputs={...}, outputs={"lines": gr.JSON()})
 
-script = FnNode(
-    fn=generate_script,
-    inputs={"topic": gr.Textbox(label="Topic")},
-    outputs={"lines": gr.JSON()},
-)
-
-def text_to_speech(text: str, speaker: str) -> str:
-    # Process single item
-    return f"audio_for_{speaker}.mp3"
-
-# .each["key"] - scatter: run once per item, extracting "key" from each
 tts = FnNode(
     fn=text_to_speech,
     inputs={
-        "text": script.lines.each["text"],      # Each item's "text" field
-        "speaker": script.lines.each["speaker"], # Each item's "speaker" field
+        "text": script.lines.each["text"],      # Scatter: run once per item
+        "speaker": script.lines.each["speaker"],
     },
     outputs={"audio": gr.Audio()},
 )
 
-def combine_audio(audio_files: list[str]) -> str:
-    # Combine all audio files
-    return "combined.mp3"
-
-# .all() - gather: collect all outputs back into a list
 final = FnNode(
     fn=combine_audio,
-    inputs={"audio_files": tts.audio.all()},  # Gathers all audio outputs
-    outputs={"audio": gr.Audio(label="Final Audio")},
+    inputs={"audio_files": tts.audio.all()},    # Gather: collect all outputs
+    outputs={"audio": gr.Audio()},
 )
-
-graph = Graph(nodes=[script, tts, final])
 ```
 
-**Visual indicator**: Scatter edges show as forked lines (→⟨) and gather edges show as converging lines (⟩→) in the canvas UI.
-
-## Full Example: Podcast Generator
+## Putting It Together: A Mock Podcast Generator
 
 ```python
 import gradio as gr
@@ -246,7 +246,7 @@ graph = Graph(name="Podcast Generator", nodes=[host_voice, guest_voice, dialogue
 graph.launch()
 ```
 
-## Sharing
+## Sharing and Hosting
 
 Create a public URL to share your workflow with others:
 
@@ -255,6 +255,8 @@ graph.launch(share=True)
 ```
 
 This generates a temporary public URL (expires in 1 week) using Gradio's tunneling infrastructure.
+
+For permanent hosting, you can deploy Daggr apps on [Hugging Face Spaces](https://huggingface.co/spaces) using the Gradio SDK. Just create a new Space with the Gradio SDK, add your workflow code to `app.py`, and include `daggr` in your `requirements.txt`.
 
 ## Hugging Face Authentication
 
