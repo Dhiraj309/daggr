@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
@@ -1216,7 +1217,7 @@ class DaggrServer:
         **kwargs,
     ):
         import secrets
-        import threading
+        import time
 
         import uvicorn
         from gradio.utils import colab_check, ipython_check
@@ -1225,46 +1226,47 @@ class DaggrServer:
 
         is_colab = colab_check()
         is_kaggle = os.environ.get("KAGGLE_KERNEL_RUN_TYPE") is not None
+        is_notebook = is_colab or is_kaggle or ipython_check()
 
         if share is None:
             share = is_colab or is_kaggle
 
-        if share:
-            server_thread = threading.Thread(
-                target=lambda: uvicorn.run(
-                    self.app, host=host, port=port, log_level="warning", **kwargs
-                ),
-                daemon=True,
+        if is_notebook or share:
+            config = uvicorn.Config(
+                app=self.app,
+                host=host,
+                port=port,
+                log_level="warning",
             )
-            server_thread.start()
+            server = _Server(config)
+            server.run_in_thread()
 
-            import time
+            local_url = f"http://{host}:{port}"
+            print(f"\n  daggr running at {local_url}")
 
-            time.sleep(1)
+            share_url = None
+            if share:
+                from gradio.networking import setup_tunnel
 
-            from gradio.networking import setup_tunnel
+                share_token = secrets.token_urlsafe(32)
+                share_url = setup_tunnel(
+                    local_host=host,
+                    local_port=port,
+                    share_token=share_token,
+                    share_server_address=None,
+                    share_server_tls_certificate=None,
+                )
+                print(f"  Public URL: {share_url}")
+                print(
+                    "\n  This share link expires in 1 week. For permanent hosting, deploy to Hugging Face Spaces.\n"
+                )
 
-            share_token = secrets.token_urlsafe(32)
-            share_url = setup_tunnel(
-                local_host=host,
-                local_port=port,
-                share_token=share_token,
-                share_server_address=None,
-                share_server_tls_certificate=None,
-            )
-            print(f"\n  daggr running at http://{host}:{port}")
-            print(f"  Public URL: {share_url}")
-            print(
-                "\n  This share link expires in 1 week. For permanent hosting, deploy to Hugging Face Spaces.\n"
-            )
-
-            if is_colab and ipython_check():
+            if is_colab or is_kaggle:
                 from IPython.display import HTML, display
 
+                url = share_url or local_url
                 display(
-                    HTML(
-                        f'<a href="{share_url}" target="_blank">Open daggr app in new tab: {share_url}</a>'
-                    )
+                    HTML(f'<a href="{url}" target="_blank">Open daggr app: {url}</a>')
                 )
 
             try:
@@ -1272,6 +1274,30 @@ class DaggrServer:
                     time.sleep(1)
             except KeyboardInterrupt:
                 print("\nShutting down...")
+                server.close()
         else:
             print(f"\n  daggr running at http://{host}:{port}\n")
             uvicorn.run(self.app, host=host, port=port, **kwargs)
+
+
+class _Server(uvicorn.Server):
+    def install_signal_handlers(self):
+        pass
+
+    def run_in_thread(self):
+        import threading
+        import time
+
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+        start = time.time()
+        while not self.started:
+            time.sleep(1e-3)
+            if time.time() - start > 5:
+                raise RuntimeError(
+                    "Server failed to start. Please check that the port is available."
+                )
+
+    def close(self):
+        self.should_exit = True
+        self.thread.join(timeout=5)
