@@ -374,6 +374,32 @@ Please check the model name is correct (format: 'username/model-name').
 
 These errors make it easy for LLMs to understand what went wrong and fix the generated code automatically, enabling a smoother AI-assisted development experience.
 
+## Running Locally
+
+While in our examples above, we've seen how Daggr works with remote Gradio Spaces and Hugging Face Inference Providers, it's also well-suited for completely local, offline workflows. The open source nature of Gradio apps makes this straightforward—you can clone any Gradio Space, run it locally, and pass the local URL to `GradioNode` instead of a Space ID:
+
+```python
+from daggr import GradioNode, Graph
+import gradio as gr
+
+# Connect to a Gradio app running locally on port 7860
+local_model = GradioNode(
+    "http://localhost:7860",  # Local URL instead of Space ID
+    api_name="/predict",
+    inputs={
+        "text": gr.Textbox(label="Input"),
+    },
+    outputs={
+        "result": gr.Textbox(label="Output"),
+    },
+)
+
+graph = Graph(name="Local Workflow", nodes=[local_model])
+graph.launch()
+```
+
+This approach lets you run your entire workflow offline, use custom or fine-tuned models, and avoid API rate limits.
+
 ## Beta Status
 
 > [!WARNING]
