@@ -88,7 +88,7 @@ Use Daggr when:
 * The workflow is complex enough that inspecting intermediate outputs or rerunning individual steps is useful
 * You need a fixed pipeline that you or others can run with different inputs
 
-**Why not... ComfyUI?** ComfyUI is a visual node editor where you build workflows by dragging and connecting nodes. Daggr takes a code-first approach: you define workflows in Python and the visual canvas is generated automatically. If you prefer writing code over visual editing, Daggr may be a better fit.
+**Why not... ComfyUI?** ComfyUI is a visual node editor where you build workflows by dragging and connecting nodes. Daggr takes a code-first approach: you define workflows in Python and the visual canvas is generated automatically. If you prefer writing code over visual editing, Daggr may be a better fit. In addition, Daggr works with Gradio Spaces and Hugging Face models directly, no need for specialized nodes.
 
 **Why not... Airflow/Prefect?** Daggr was inspired by Airflow/Prefect, but whereas the focus of these orchestration platforms is scheduling, monitoring, and managing pipelines at scale, Daggr is built for interactive AI/ML workflows with real-time visual feedback and immediate execution, making it ideal for prototyping, demos, and workflows where you want to inspect intermediate outputs and rerun individual steps on the fly.
 
