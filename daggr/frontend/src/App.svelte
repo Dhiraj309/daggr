@@ -941,7 +941,7 @@
 					<div class="exec-time" class:running={timeDisplay.isRunning} class:error={timeDisplay.isError}>{timeDisplay.text}</div>
 				{/if}
 				<div class="node-header">
-					<span class="type-badge" style={getBadgeStyle(node.type)}>{node.type}{#if node.is_local} <span class="local-indicator">LOCAL ⚡</span>{/if}</span>
+					<span class="type-badge" style={getBadgeStyle(node.type)}>{node.type}{#if node.is_local}&nbsp;⚡{/if}</span>
 					<span class="node-name">{node.name}</span>
 					{#if !node.is_input_node}
 						<span 
@@ -1522,12 +1522,6 @@
 		border-radius: 4px;
 		color: #fff;
 		flex-shrink: 0;
-	}
-
-	.local-indicator {
-		font-size: 7px;
-		opacity: 0.9;
-		margin-left: 2px;
 	}
 
 	.node-name {

@@ -116,6 +116,30 @@ class LocalSpaceManager:
         self._save_metadata(metadata)
         print(f"  Cloned to {self.repo_dir}")
 
+    def _get_sdk_version(self) -> str | None:
+        readme_path = self.repo_dir / "README.md"
+        if not readme_path.exists():
+            return None
+
+        try:
+            content = readme_path.read_text()
+            if not content.startswith("---"):
+                return None
+
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return None
+
+            import re
+
+            match = re.search(r"sdk_version:\s*['\"]?([^\s'\"]+)", parts[1])
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+
+        return None
+
     def _ensure_venv(self) -> None:
         requirements_path = self.repo_dir / "requirements.txt"
         current_hash = _hash_file(requirements_path)
@@ -154,6 +178,24 @@ class LocalSpaceManager:
             check=True,
             capture_output=True,
         )
+
+        sdk_version = self._get_sdk_version()
+        if sdk_version:
+            gradio_pkg = f"gradio=={sdk_version}"
+            print(f"  Installing {gradio_pkg}...")
+        else:
+            gradio_pkg = "gradio"
+            print(f"  Installing gradio (latest)...")
+
+        result = subprocess.run(
+            [str(pip_path), "install", gradio_pkg],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout
+            self._log_to_file("pip_install_gradio", error_msg)
+            print(f"    Warning: Failed to install {gradio_pkg}")
 
         if requirements_path.exists():
             print(f"  Installing dependencies from {requirements_path}...")
@@ -230,8 +272,10 @@ class LocalSpaceManager:
         env = os.environ.copy()
         env["GRADIO_SERVER_PORT"] = str(port)
         env["GRADIO_SERVER_NAME"] = "127.0.0.1"
+        env["PYTHONUNBUFFERED"] = "1"
 
         print(f"  Launching '{self.space_id}' on port {port}...")
+        print(f"  Waiting for app to start (timeout: {timeout}s)...")
 
         log_file = self._get_log_path("launch")
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -247,7 +291,7 @@ class LocalSpaceManager:
 
         _running_processes[self.space_id] = self.process
 
-        ready, error_output = self._wait_for_ready(local_url, timeout, verbose)
+        ready, error_output = self._wait_for_ready(local_url, timeout, verbose=True)
         if not ready:
             self._log_to_file("launch", error_output)
             if self.process.poll() is None:
@@ -296,6 +340,8 @@ class LocalSpaceManager:
 
         output_lines: list[str] = []
         start = time.time()
+        last_status_time = start
+        saw_error = False
 
         while time.time() - start < timeout:
             if self.process and self.process.stdout:
@@ -312,15 +358,42 @@ class LocalSpaceManager:
 
                     if line:
                         output_lines.append(line)
+                        line_lower = line.lower()
+                        if (
+                            "traceback" in line_lower
+                            or "modulenotfounderror" in line_lower
+                        ):
+                            saw_error = True
                         if verbose:
                             print(f"    [app] {line.rstrip()}")
 
-            if self.process and self.process.poll() is not None:
-                if self.process.stdout:
+            exit_code = self.process.poll() if self.process else None
+            if exit_code is not None:
+                if self.process and self.process.stdout:
                     remaining = self.process.stdout.read()
                     if remaining:
                         output_lines.append(remaining)
+                        if verbose:
+                            for rem_line in remaining.strip().split("\n"):
+                                if rem_line.strip():
+                                    print(f"    [app] {rem_line}")
+                print(f"  App process exited with code {exit_code}")
                 return False, "".join(output_lines)
+
+            if saw_error:
+                time.sleep(0.5)
+                if self.process and self.process.poll() is not None:
+                    if self.process.stdout:
+                        remaining = self.process.stdout.read()
+                        if remaining:
+                            output_lines.append(remaining)
+                    print(f"  App crashed during startup")
+                    return False, "".join(output_lines)
+
+            elapsed = time.time() - start
+            if elapsed - (last_status_time - start) >= 10:
+                print(f"    Still waiting... ({int(elapsed)}s elapsed)")
+                last_status_time = time.time()
 
             try:
                 with urllib.request.urlopen(url, timeout=2) as response:
