@@ -166,8 +166,17 @@ class Graph:
     ):
         from daggr.server import DaggrServer
 
+        self._prepare_local_nodes()
         server = DaggrServer(self)
         server.run(host=host, port=port, share=share, **kwargs)
+
+    def _prepare_local_nodes(self) -> None:
+        from daggr.local_space import prepare_local_node
+        from daggr.node import GradioNode
+
+        for node in self.nodes.values():
+            if isinstance(node, GradioNode) and node._run_locally:
+                prepare_local_node(node)
 
     def __repr__(self):
         return f"Graph(name={self.name}, nodes={len(self.nodes)}, edges={len(self._edges)})"

@@ -122,10 +122,14 @@ class GradioNode(Node):
         inputs: dict[str, Any] | None = None,
         outputs: dict[str, Any] | None = None,
         validate: bool = True,
+        run_locally: bool = False,
     ):
         super().__init__(name)
         self._src = space_or_url
         self._api_name = api_name
+        self._run_locally = run_locally
+        self._local_url: str | None = None
+        self._local_failed = False
 
         if validate:
             self._validate_space_format()
@@ -143,7 +147,7 @@ class GradioNode(Node):
         self._process_outputs(outputs or {})
         self._validate_ports()
 
-        if validate:
+        if validate and not run_locally:
             self._validate_gradio_api(inputs or {}, outputs or {})
 
     def _validate_space_format(self) -> None:

@@ -376,22 +376,78 @@ These errors make it easy for LLMs to understand what went wrong and fix the gen
 
 ## Running Locally
 
-While in our examples above, we've seen how Daggr works with remote Gradio Spaces and Hugging Face Inference Providers, it's also well-suited for completely local, offline workflows. The open source nature of Gradio apps makes this straightforward—you can clone any Gradio Space, run it locally, and pass the local URL to `GradioNode` instead of a Space ID:
+While in our examples above, we've seen how Daggr works with remote Gradio Spaces and Hugging Face Inference Providers, it's also well-suited for completely local, offline workflows.
+
+### Automatic Local Execution
+
+The easiest way to run a Space locally is to set `run_locally=True` on any `GradioNode`. Daggr will automatically clone the Space, install dependencies in an isolated virtual environment, and launch the Gradio app:
 
 ```python
 from daggr import GradioNode, Graph
 import gradio as gr
 
-# Connect to a Gradio app running locally on port 7860
+# Automatically clone and run the Space locally
+background_remover = GradioNode(
+    "hf-applications/background-removal",
+    api_name="/image",
+    run_locally=True,  # Run locally instead of calling the remote API
+    inputs={"image": gr.Image(label="Input Image")},
+    outputs={"final_image": gr.Image(label="Output")},
+)
+
+graph = Graph(name="Local Background Removal", nodes=[background_remover])
+graph.launch()
+```
+
+On first run, daggr will:
+
+1. Clone the Space repository to `~/.cache/huggingface/daggr/spaces/`
+2. Create an isolated virtual environment with the Space's dependencies
+3. Launch the Gradio app on an available port
+4. Connect to it automatically
+
+Subsequent runs reuse the cached clone and venv, making startup much faster.
+
+### Graceful Fallback
+
+If local execution fails (missing dependencies, GPU requirements, etc.), daggr automatically falls back to the remote API and prints helpful guidance:
+
+```
+⚠️  Local execution failed for 'owner/space-name'
+Reason: Failed to install dependencies
+Logs: ~/.cache/huggingface/daggr/logs/owner_space-name_pip_install_2026-01-27.log
+Falling back to remote API...
+```
+
+To disable fallback and see the full error (useful for debugging):
+
+```bash
+export DAGGR_LOCAL_NO_FALLBACK=1
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DAGGR_LOCAL_TIMEOUT` | `120` | Seconds to wait for the app to start |
+| `DAGGR_LOCAL_VERBOSE` | `0` | Set to `1` to show app stdout/stderr |
+| `DAGGR_LOCAL_NO_FALLBACK` | `0` | Set to `1` to disable fallback to remote |
+| `DAGGR_UPDATE_SPACES` | `0` | Set to `1` to re-clone cached Spaces |
+
+### Manual Local URL
+
+You can also run a Gradio app yourself and point to it directly:
+
+```python
+from daggr import GradioNode, Graph
+import gradio as gr
+
+# Connect to a Gradio app you're running locally
 local_model = GradioNode(
     "http://localhost:7860",  # Local URL instead of Space ID
     api_name="/predict",
-    inputs={
-        "text": gr.Textbox(label="Input"),
-    },
-    outputs={
-        "result": gr.Textbox(label="Output"),
-    },
+    inputs={"text": gr.Textbox(label="Input")},
+    outputs={"result": gr.Textbox(label="Output")},
 )
 
 graph = Graph(name="Local Workflow", nodes=[local_model])

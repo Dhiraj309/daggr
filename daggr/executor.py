@@ -29,6 +29,14 @@ class SequentialExecutor:
         if node_name in self.clients:
             return self.clients[node_name]
 
+        if node._run_locally:
+            from daggr.local_space import get_local_client
+
+            client = get_local_client(node)
+            if client is not None:
+                self.clients[node_name] = client
+                return client
+
         from daggr import _client_cache
 
         client = _client_cache.get_client(node._src)

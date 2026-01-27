@@ -359,6 +359,13 @@ class DaggrServer:
     def _is_output_node(self, node_name: str) -> bool:
         return self.graph._nx_graph.out_degree(node_name) == 0
 
+    def _is_running_locally(self, node) -> bool:
+        from daggr.node import GradioNode
+
+        if not isinstance(node, GradioNode):
+            return False
+        return bool(node._run_locally and node._local_url and not node._local_failed)
+
     def _get_component_type(self, component) -> str:
         class_name = component.__class__.__name__
         type_map = {
@@ -838,6 +845,7 @@ class DaggrServer:
                     output_ports.append(port_name)
 
             is_output = self._is_output_node(node_name)
+            is_local = self._is_running_locally(node)
 
             nodes.append(
                 {
@@ -862,6 +870,7 @@ class DaggrServer:
                     "result": result_str,
                     "is_output_node": is_output,
                     "is_input_node": False,
+                    "is_local": is_local,
                 }
             )
 
