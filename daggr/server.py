@@ -116,7 +116,9 @@ class DaggrServer:
             return {"sheets": sheets, "user_id": user_id}
 
         @self.app.post("/api/sheets")
-        async def create_sheet(request: Request, authorization: str | None = Header(default=None)):
+        async def create_sheet(
+            request: Request, authorization: str | None = Header(default=None)
+        ):
             if not self.graph.persist_key:
                 return JSONResponse(
                     {"error": "Persistence is disabled for this graph"},
@@ -140,7 +142,11 @@ class DaggrServer:
             return {"sheet": sheet}
 
         @self.app.patch("/api/sheets/{sheet_id}")
-        async def rename_sheet(sheet_id: str, request: Request, authorization: str | None = Header(default=None)):
+        async def rename_sheet(
+            sheet_id: str,
+            request: Request,
+            authorization: str | None = Header(default=None),
+        ):
             browser_token = self._extract_token_from_header(authorization)
             if browser_token:
                 hf_user = self._validate_hf_token(browser_token)
@@ -162,7 +168,9 @@ class DaggrServer:
             return {"success": True, "sheet": self.state.get_sheet(sheet_id)}
 
         @self.app.delete("/api/sheets/{sheet_id}")
-        async def delete_sheet(sheet_id: str, authorization: str | None = Header(default=None)):
+        async def delete_sheet(
+            sheet_id: str, authorization: str | None = Header(default=None)
+        ):
             browser_token = self._extract_token_from_header(authorization)
             if browser_token:
                 hf_user = self._validate_hf_token(browser_token)
@@ -180,7 +188,9 @@ class DaggrServer:
             return {"success": True}
 
         @self.app.get("/api/sheets/{sheet_id}/state")
-        async def get_sheet_state(sheet_id: str, authorization: str | None = Header(default=None)):
+        async def get_sheet_state(
+            sheet_id: str, authorization: str | None = Header(default=None)
+        ):
             browser_token = self._extract_token_from_header(authorization)
             if browser_token:
                 hf_user = self._validate_hf_token(browser_token)
@@ -321,7 +331,10 @@ class DaggrServer:
                             for node_name, results_list in persisted_results.items():
                                 if results_list:
                                     last_entry = results_list[-1]
-                                    if isinstance(last_entry, dict) and "result" in last_entry:
+                                    if (
+                                        isinstance(last_entry, dict)
+                                        and "result" in last_entry
+                                    ):
                                         node_results[node_name] = last_entry["result"]
                                     else:
                                         node_results[node_name] = last_entry
@@ -710,10 +723,12 @@ class DaggrServer:
             transformed[node_name] = []
             for entry in results_list:
                 if isinstance(entry, dict) and "result" in entry:
-                    transformed[node_name].append({
-                        "result": self._transform_file_paths(entry["result"]),
-                        "inputs_snapshot": entry.get("inputs_snapshot"),
-                    })
+                    transformed[node_name].append(
+                        {
+                            "result": self._transform_file_paths(entry["result"]),
+                            "inputs_snapshot": entry.get("inputs_snapshot"),
+                        }
+                    )
                 else:
                     transformed[node_name].append(self._transform_file_paths(entry))
         return transformed
@@ -1467,7 +1482,9 @@ class DaggrServer:
             if user_output is not None:
                 existing_results[node_name] = user_output
                 if can_persist:
-                    self.state.save_result(sheet_id, node_name, user_output, input_values)
+                    self.state.save_result(
+                        sheet_id, node_name, user_output, input_values
+                    )
                 continue
 
             if node_name == target_node:
@@ -1514,7 +1531,7 @@ class DaggrServer:
                     continue
 
                 can_execute = await session.start_node_execution(node_name)
-                
+
                 if not can_execute:
                     await session.wait_for_node(node_name)
                     if node_name in session.results:
@@ -1552,7 +1569,9 @@ class DaggrServer:
                     node_statuses[node_name] = "completed"
 
                     if can_persist:
-                        self.state.save_result(sheet_id, node_name, result, input_values)
+                        self.state.save_result(
+                            sheet_id, node_name, result, input_values
+                        )
 
                     graph_data = self._build_graph_data(
                         node_results, node_statuses, input_values, {}, sheet_id

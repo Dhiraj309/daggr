@@ -70,7 +70,7 @@ class ExecutionSession:
         self.selected_variants: dict[str, int] = {}
         self.clients: dict[str, Any] = {}
         self.concurrency = ConcurrencyManager()
-        
+
         self._executing_nodes: dict[str, asyncio.Event] = {}
         self._execution_lock = asyncio.Lock()
 
@@ -87,12 +87,12 @@ class ExecutionSession:
 
     async def wait_for_node(self, node_name: str) -> bool:
         """Wait for a node to finish executing if it's currently running.
-        
+
         Returns True if we waited (node was executing), False otherwise.
         """
         async with self._execution_lock:
             event = self._executing_nodes.get(node_name)
-        
+
         if event:
             await event.wait()
             return True
@@ -100,7 +100,7 @@ class ExecutionSession:
 
     async def start_node_execution(self, node_name: str) -> bool:
         """Mark a node as starting execution.
-        
+
         Returns True if we can start (no one else is executing it).
         Returns False if someone else is already executing it.
         """

@@ -350,7 +350,9 @@ class SessionState:
     ):
         now = datetime.now().isoformat()
         result_json = json.dumps(result, default=str)
-        inputs_json = json.dumps(inputs_snapshot, default=str) if inputs_snapshot else None
+        inputs_json = (
+            json.dumps(inputs_snapshot, default=str) if inputs_snapshot else None
+        )
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(

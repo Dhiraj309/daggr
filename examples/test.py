@@ -213,12 +213,17 @@ def concat_videos(v1: str, v2: str, v3: str, v4: str) -> str:
             f.write(f"file '{v}'\n")
 
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", list_file,
-        "-c", "copy",
-        output_path
+        "ffmpeg",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        list_file,
+        "-c",
+        "copy",
+        output_path,
     ]
     subprocess.run(cmd, check=True, capture_output=True)
     return output_path
@@ -241,8 +246,15 @@ combine_videos = FnNode(
 graph = Graph(
     name="AI Slideshow with Smooth Transitions",
     nodes=[
-        image1, image2, image3, image4, image5,
-        transition_1_2, transition_2_3, transition_3_4, transition_4_5,
+        image1,
+        image2,
+        image3,
+        image4,
+        image5,
+        transition_1_2,
+        transition_2_3,
+        transition_3_4,
+        transition_4_5,
         combine_videos,
     ],
 )
