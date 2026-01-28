@@ -316,7 +316,7 @@ Each node's `outputs` dict accepts two types of values:
 | **Gradio component** | `gr.Image(label="Result")` | Displays output in node card |
 | **None** | `None` | Hidden, but can connect to downstream nodes |
 
-### Scatter / Gather
+### Scatter / Gather (experimental)
 
 When a node outputs a list and you want to process each item individually, use `.each` to scatter and `.all()` to gather:
 
@@ -339,7 +339,7 @@ final = FnNode(
 )
 ```
 
-### Choice Nodes
+### Choice Nodes (experimental)
 
 Sometimes you want to offer multiple alternatives for the same step in your workflow—for example, two different TTS providers or image generators. Use the `|` operator to create a **choice node** that lets users switch between variants in the UI:
 

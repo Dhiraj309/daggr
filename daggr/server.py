@@ -1400,6 +1400,9 @@ class DaggrServer:
             if k not in session.results:
                 session.results[k] = v
 
+        if target_node in session.results:
+            del session.results[target_node]
+
         node_results = {}
         node_statuses = {}
 
@@ -1506,6 +1509,9 @@ class DaggrServer:
             if k not in session.results:
                 session.results[k] = v
 
+        if target_node in session.results:
+            del session.results[target_node]
+
         node_results = {}
         node_statuses = {}
 
@@ -1531,8 +1537,9 @@ class DaggrServer:
                     continue
 
                 can_execute = await session.start_node_execution(node_name)
-
                 if not can_execute:
+                    if node_name == target_node:
+                        return
                     await session.wait_for_node(node_name)
                     if node_name in session.results:
                         result = session.results[node_name]

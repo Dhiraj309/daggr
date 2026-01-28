@@ -25,8 +25,7 @@
 	let reconnectTimer: number | null = null;
 
 	let inputValues = $state<Record<string, Record<string, any>>>({});
-	let pendingRunIds = $state<Record<string, string[]>>({});
-	let runIdToNodes = $state<Record<string, string[]>>({});
+	let runningNodes = $state<Set<string>>(new Set());
 	let nodeResults = $state<Record<string, any[]>>({});
 	let nodeInputsSnapshots = $state<Record<string, (Record<string, any> | null)[]>>({});
 	let selectedResultIndex = $state<Record<string, number>>({});
@@ -82,7 +81,6 @@
 		}
 	}
 
-	const globalProcessedSet = new Set<string>();
 	let timerInterval: number | null = null;
 
 	let nodes = $derived(graphData?.nodes || []);
@@ -97,20 +95,11 @@
 	}
 
 	function stopTimerIfNoRunning() {
-		const hasRunning = Object.values(pendingRunIds).some(ids => ids.length > 0);
-		if (!hasRunning && timerInterval) {
+		if (runningNodes.size === 0 && timerInterval) {
 			clearInterval(timerInterval);
 			timerInterval = null;
 		}
 	}
-
-	let runningCounts = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		for (const [nodeName, ids] of Object.entries(pendingRunIds)) {
-			counts[nodeName] = ids.length;
-		}
-		return counts;
-	});
 
 	const NODE_WIDTH = 280;
 	const HEADER_HEIGHT = 36;
@@ -299,11 +288,10 @@
 		inputValues = {};
 		itemListValues = {};
 		selectedVariants = {};
-		pendingRunIds = {};
+		runningNodes = new Set();
 		nodeStartTimes = {};
 		nodeExecutionTimes = {};
 		nodeErrors = {};
-		globalProcessedSet.clear();
 		if (timerInterval) {
 			clearInterval(timerInterval);
 			timerInterval = null;
@@ -467,38 +455,16 @@
 			if (errorNode) {
 				nodeErrors[errorNode] = data.error;
 				delete nodeStartTimes[errorNode];
-				if (pendingRunIds[errorNode]) {
-					pendingRunIds[errorNode] = [];
-				}
+				runningNodes.delete(errorNode);
+				runningNodes = new Set(runningNodes);
 				stopTimerIfNoRunning();
 			}
 		} else if (data.type === 'node_complete' || data.type === 'error') {
-			const runId = data.run_id;
 			const completedNode = data.completed_node;
 			
-			if (runId && completedNode) {
-				const completionKey = `${runId}:${completedNode}`;
-				
-				if (!globalProcessedSet.has(completionKey)) {
-					globalProcessedSet.add(completionKey);
-					
-					if (pendingRunIds[completedNode]) {
-						pendingRunIds[completedNode] = pendingRunIds[completedNode].filter(id => id !== runId);
-					}
-					
-					const executedNodes = runIdToNodes[runId];
-					if (executedNodes) {
-						const allDone = executedNodes.every(n => globalProcessedSet.has(`${runId}:${n}`));
-						if (allDone) {
-							delete runIdToNodes[runId];
-							setTimeout(() => {
-								for (const n of executedNodes) {
-									globalProcessedSet.delete(`${runId}:${n}`);
-								}
-							}, 1000);
-						}
-					}
-				}
+			if (completedNode) {
+				runningNodes.delete(completedNode);
+				runningNodes = new Set(runningNodes);
 			}
 			
 			if (completedNode && data.execution_time_ms != null) {
@@ -930,28 +896,15 @@
 	function handleRunToNode(e: MouseEvent, nodeName: string) {
 		e.stopPropagation();
 		
-		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-		const ancestors = getAncestors(nodeName);
-		const nodesToExecute = [...ancestors, nodeName];
-		
-		const nodesToMark = nodesToExecute.filter(n => {
-			if (n === nodeName) return true;
-			const results = nodeResults[n];
-			if (results && results.length > 0) return false;
-			const node = nodes.find(nd => nd.name === n);
-			if (node && hasUserProvidedOutput(node)) return false;
-			return true;
-		});
-		
-		for (const nodeToMark of nodesToMark) {
-			if (!pendingRunIds[nodeToMark]) {
-				pendingRunIds[nodeToMark] = [];
-			}
-			pendingRunIds[nodeToMark] = [...pendingRunIds[nodeToMark], runId];
-			delete nodeExecutionTimes[nodeToMark];
+		if (runningNodes.has(nodeName)) {
+			return;
 		}
 		
-		runIdToNodes[runId] = nodesToMark;
+		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+		
+		runningNodes.add(nodeName);
+		runningNodes = new Set(runningNodes);
+		delete nodeExecutionTimes[nodeName];
 		
 		if (ws && wsConnected) {
 			ws.send(JSON.stringify({
@@ -1047,7 +1000,7 @@
 			return { text: 'Error', isRunning: false, isError: true };
 		}
 		
-		const isRunning = (pendingRunIds[nodeName]?.length ?? 0) > 0;
+		const isRunning = runningNodes.has(nodeName);
 		const startTime = nodeStartTimes[nodeName];
 		const finalTime = nodeExecutionTimes[nodeName];
 		const avgData = nodeAvgTimes[nodeName];
@@ -1144,9 +1097,10 @@
 					{#if !node.is_input_node}
 						<span 
 							class="run-btn"
-							class:running={runningCounts[node.name] > 0}
+							class:running={runningNodes.has(node.name)}
+							class:disabled={runningNodes.has(node.name)}
 							onclick={(e) => handleRunToNode(e, node.name)}
-							title={node.is_map_node ? "Run all items" : "Run to here"}
+							title={runningNodes.has(node.name) ? "Running..." : (node.is_map_node ? "Run all items" : "Run to here")}
 							role="button"
 							tabindex="0"
 						>
@@ -1160,8 +1114,8 @@
 									<path d="M1 1 L9 6 L1 11 Z"/>
 								</svg>
 							{/if}
-							{#if runningCounts[node.name] > 0}
-								<span class="run-badge">{runningCounts[node.name]}</span>
+							{#if runningNodes.has(node.name)}
+								<span class="run-badge"></span>
 							{/if}
 						</span>
 					{/if}
