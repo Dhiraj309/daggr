@@ -27,13 +27,6 @@ graph.launch()  # Starts web server with visual DAG UI
 ### GradioNode - Gradio Spaces
 
 ```python
-# Image generation example
-img = GradioNode("Tongyi-MAI/Z-Image-Turbo", api_name="/generate",
-    inputs={"prompt": gr.Textbox(), "resolution": "1024x1024 ( 1:1 )"},
-    postprocess=lambda imgs, *_: imgs[0]["image"],
-    outputs={"image": gr.Image()})
-
-# General pattern
 node = GradioNode(
     space_or_url="owner/space-name",
     api_name="/endpoint",
@@ -45,6 +38,12 @@ node = GradioNode(
     postprocess=lambda *returns: returns[0],   # Transform response
     outputs={"result": gr.Image(label="Output")},
 )
+
+# Example: image generation
+img = GradioNode("Tongyi-MAI/Z-Image-Turbo", api_name="/generate",
+    inputs={"prompt": gr.Textbox(), "resolution": "1024x1024 ( 1:1 )"},
+    postprocess=lambda imgs, *_: imgs[0]["image"],
+    outputs={"image": gr.Image()})
 ```
 
 Find Spaces (semantic search for trending Spaces by task): `https://huggingface.co/api/spaces/semantic-search?q=text+to+speech&sdk=gradio`
