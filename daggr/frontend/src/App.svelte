@@ -1009,6 +1009,7 @@
 		if (current > 0) {
 			const newIndex = current - 1;
 			selectedResultIndex[nodeName] = newIndex;
+			selectedResultIndex = { ...selectedResultIndex };
 			restoreInputsSnapshot(nodeName, newIndex);
 			autoMatchDownstream(nodeName, newIndex);
 		}
@@ -1021,6 +1022,7 @@
 		if (current < total - 1) {
 			const newIndex = current + 1;
 			selectedResultIndex[nodeName] = newIndex;
+			selectedResultIndex = { ...selectedResultIndex };
 			restoreInputsSnapshot(nodeName, newIndex);
 			autoMatchDownstream(nodeName, newIndex);
 		}

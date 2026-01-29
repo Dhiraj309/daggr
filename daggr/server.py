@@ -1604,11 +1604,13 @@ class DaggrServer:
                     node_statuses[node_name] = "completed"
 
                     if can_persist:
+                        current_count = self.state.get_result_count(sheet_id, node_name)
                         snapshot = {
                             "inputs": input_values,
                             "selected_results": selected_results,
                         }
                         self.state.save_result(sheet_id, node_name, result, snapshot)
+                        selected_results[node_name] = current_count
 
                     graph_data = self._build_graph_data(
                         node_results,

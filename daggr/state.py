@@ -381,6 +381,17 @@ class SessionState:
             return json.loads(result[0])
         return None
 
+    def get_result_count(self, sheet_id: str, node_name: str) -> int:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM node_results WHERE sheet_id = ? AND node_name = ?",
+            (sheet_id, node_name),
+        )
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+
     def get_result_by_index(
         self, sheet_id: str, node_name: str, index: int
     ) -> Any | None:
