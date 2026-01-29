@@ -925,6 +925,10 @@
 		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 		
 		runningNodes.add(nodeName);
+		const ancestors = getAncestors(nodeName);
+		for (const ancestor of ancestors) {
+			runningNodes.add(ancestor);
+		}
 		runningNodes = new Set(runningNodes);
 		delete nodeExecutionTimes[nodeName];
 		
