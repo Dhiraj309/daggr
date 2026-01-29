@@ -107,9 +107,15 @@ def main():
         help="Don't watch daggr source for changes",
     )
     parser.add_argument(
-        "--reset-cache",
+        "--delete-sheets",
         action="store_true",
         help="Delete all cached data (sheets, results, downloaded files) for this project and exit",
+    )
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Skip confirmation prompts (use with --delete-sheets)",
     )
 
     args = parser.parse_args()
@@ -123,8 +129,8 @@ def main():
         print(f"Error: Script must be a Python file: {script_path}")
         sys.exit(1)
 
-    if args.reset_cache:
-        _reset_cache(script_path)
+    if args.delete_sheets:
+        _delete_sheets(script_path, force=args.force)
         sys.exit(0)
 
     watch_daggr = args.watch_daggr and not args.no_watch_daggr
@@ -447,7 +453,7 @@ def _get_gradio_version() -> str:
         return "5.0.0"
 
 
-def _reset_cache(script_path: Path):
+def _delete_sheets(script_path: Path, force: bool = False):
     """Delete all cached data for the project defined in the script."""
     import sqlite3
 
@@ -518,17 +524,18 @@ def _reset_cache(script_path: Path):
     print(f"This will delete {len(sheet_ids)} sheet(s) and all associated data.")
     print(f"Cache location: {cache_dir}\n")
 
-    try:
-        response = input("Are you sure you want to continue? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\nAborted.")
-        conn.close()
-        return
+    if not force:
+        try:
+            response = input("Are you sure you want to continue? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            conn.close()
+            return
 
-    if response not in ("y", "yes"):
-        print("Aborted.")
-        conn.close()
-        return
+        if response not in ("y", "yes"):
+            print("Aborted.")
+            conn.close()
+            return
 
     for sheet_id in sheet_ids:
         cursor.execute("DELETE FROM node_inputs WHERE sheet_id = ?", (sheet_id,))

@@ -390,7 +390,6 @@
 			}
 			
 			if (data.data.persisted_results) {
-				console.log('[PROVENANCE] Loading persisted_results:', data.data.persisted_results);
 				for (const [nodeName, results] of Object.entries(data.data.persisted_results as Record<string, any[]>)) {
 					if (results && results.length > 0) {
 						const node = data.data.nodes?.find((n: GraphNode) => n.name === nodeName);
@@ -399,8 +398,6 @@
 							nodeResults[nodeName] = results.map((entry: any) => {
 								const result = entry?.result !== undefined ? entry.result : entry;
 								const inputsSnapshot = entry?.inputs_snapshot || null;
-								console.log(`[PROVENANCE] ${nodeName} entry:`, entry);
-								console.log(`[PROVENANCE] ${nodeName} inputs_snapshot:`, inputsSnapshot);
 								snapshots.push(inputsSnapshot);
 								
 								return node.output_components.map((comp: GradioComponentData) => {
@@ -735,6 +732,7 @@
 			d: string; 
 			is_scattered: boolean; 
 			is_gathered: boolean;
+			isStale: boolean;
 			forkPaths?: string[];
 		}[] = [];
 		
@@ -763,6 +761,21 @@
 			const is_scattered = edge.is_scattered || false;
 			const is_gathered = edge.is_gathered || false;
 
+			const toNodeSelectedIdx = selectedResultIndex[toNode.name];
+			const toNodeSnapshot = nodeInputsSnapshots[toNode.name]?.[toNodeSelectedIdx];
+			
+			let isStale = false;
+			if (toNodeSnapshot == null) {
+				isStale = true;
+			} else {
+				if (selectedResultIndex[fromNode.name] !== toNodeSnapshot.selected_results?.[fromNode.name]) {
+					isStale = true;
+				}
+				if (JSON.stringify(inputValues[fromNode.id]) !== JSON.stringify(toNodeSnapshot.inputs?.[fromNode.id])) {
+					isStale = true;
+				}
+			}
+
 			let forkPaths: string[] = [];
 
 			if (is_scattered) {
@@ -774,7 +787,7 @@
 					`M ${forkStart} ${y2} L ${x2} ${y2}`,
 					`M ${forkStart} ${y2} L ${x2} ${y2 + forkSpread}`,
 				];
-				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale, forkPaths });
 			} else if (is_gathered) {
 				const forkEnd = x1 + 30;
 				const forkSpread = 8;
@@ -784,10 +797,10 @@
 					`M ${x1} ${y1 + forkSpread} L ${forkEnd} ${y1}`,
 				];
 				const d = `M ${forkEnd} ${y1} C ${forkEnd + cp - 30} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
-				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale, forkPaths });
 			} else {
 				const d = `M ${x1} ${y1} C ${x1 + cp} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
-				paths.push({ id: edge.id, d, is_scattered, is_gathered });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale });
 			}
 		}
 		
@@ -956,15 +969,9 @@
 
 	function restoreInputsSnapshot(nodeName: string, index: number) {
 		const snapshots = nodeInputsSnapshots[nodeName];
-		console.log(`[PROVENANCE] restoreInputsSnapshot(${nodeName}, ${index})`);
-		console.log(`[PROVENANCE]   snapshots for ${nodeName}:`, snapshots);
-		if (!snapshots || !snapshots[index]) {
-			console.log(`[PROVENANCE]   No snapshot found at index ${index}`);
-			return;
-		}
+		if (!snapshots || !snapshots[index]) return;
 		
 		const snapshot = snapshots[index];
-		console.log(`[PROVENANCE]   snapshot:`, snapshot);
 		
 		const inputs = snapshot.inputs || snapshot;
 		for (const [inputNodeId, nodeInputs] of Object.entries(inputs)) {
@@ -974,15 +981,25 @@
 		}
 		
 		if (snapshot.selected_results) {
-			console.log(`[PROVENANCE]   Restoring selected_results:`, snapshot.selected_results);
 			for (const [upstreamNode, resultIdx] of Object.entries(snapshot.selected_results)) {
+				if (upstreamNode === nodeName) continue;
 				if (typeof resultIdx === 'number') {
-					console.log(`[PROVENANCE]   Setting ${upstreamNode} to index ${resultIdx}`);
 					selectedResultIndex[upstreamNode] = resultIdx;
 				}
 			}
-		} else {
-			console.log(`[PROVENANCE]   No selected_results in snapshot`);
+		}
+	}
+
+	function autoMatchDownstream(changedNode: string, newIndex: number) {
+		for (const [nodeName, snapshots] of Object.entries(nodeInputsSnapshots)) {
+			if (!snapshots || nodeName === changedNode) continue;
+			const matchIdx = snapshots.findIndex(
+				s => s?.selected_results?.[changedNode] === newIndex
+			);
+			if (matchIdx !== -1) {
+				selectedResultIndex[nodeName] = matchIdx;
+				autoMatchDownstream(nodeName, matchIdx);
+			}
 		}
 	}
 
@@ -990,8 +1007,10 @@
 		e.stopPropagation();
 		const current = selectedResultIndex[nodeName] ?? 0;
 		if (current > 0) {
-			selectedResultIndex[nodeName] = current - 1;
-			restoreInputsSnapshot(nodeName, current - 1);
+			const newIndex = current - 1;
+			selectedResultIndex[nodeName] = newIndex;
+			restoreInputsSnapshot(nodeName, newIndex);
+			autoMatchDownstream(nodeName, newIndex);
 		}
 	}
 
@@ -1000,8 +1019,10 @@
 		const total = getResultCount(nodeName);
 		const current = selectedResultIndex[nodeName] ?? 0;
 		if (current < total - 1) {
-			selectedResultIndex[nodeName] = current + 1;
-			restoreInputsSnapshot(nodeName, current + 1);
+			const newIndex = current + 1;
+			selectedResultIndex[nodeName] = newIndex;
+			restoreInputsSnapshot(nodeName, newIndex);
+			autoMatchDownstream(nodeName, newIndex);
 		}
 	}
 
@@ -1097,10 +1118,10 @@
 	>
 		<svg class="edges-svg">
 			{#each edgePaths as edge (edge.id)}
-				<path d={edge.d} class="edge-path" />
+				<path d={edge.d} class="edge-path" class:stale={edge.isStale} />
 				{#if edge.forkPaths}
 					{#each edge.forkPaths as forkD}
-						<path d={forkD} class="edge-path edge-fork" />
+						<path d={forkD} class="edge-path edge-fork" class:stale={edge.isStale} />
 					{/each}
 				{/if}
 			{/each}
@@ -1849,6 +1870,11 @@
 		stroke: #f97316;
 		stroke-width: 2.5;
 		stroke-linecap: round;
+		transition: stroke 0.2s ease;
+	}
+
+	.edge-path.stale {
+		stroke: #6b7280;
 	}
 
 	.edge-fork {

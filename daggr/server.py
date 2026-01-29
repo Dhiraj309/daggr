@@ -1608,8 +1608,6 @@ class DaggrServer:
                             "inputs": input_values,
                             "selected_results": selected_results,
                         }
-                        print(f"[PROVENANCE] Saving result for {node_name}")
-                        print(f"[PROVENANCE]   selected_results: {selected_results}")
                         self.state.save_result(sheet_id, node_name, result, snapshot)
 
                     graph_data = self._build_graph_data(
