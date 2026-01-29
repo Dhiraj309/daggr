@@ -80,6 +80,7 @@ node = InferenceNode(
 
 **Auth:** InferenceNode and ZeroGPU Spaces require a HF token. If not in env, ask user to create one:
 `https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained`
+Out of quota? Pro gives 8x ZeroGPU + 10x inference: `https://huggingface.co/subscribe/pro`
 
 ## Port Connections
 
