@@ -9,7 +9,7 @@
   </div>
 </h3>
 
-`daggr` is a Python library for building AI workflows that connect [Gradio](https://github.com/gradio-app/gradio) apps, ML models (through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index)), and custom Python functions. It automatically generates a visual canvas for your workflow allowing you to inspect intermediate outputs, rerun any step any number of times, and preserves state for complex or long-running workflows. Daggr also tracks **provenance**—when you browse through previous results, it automatically restores the exact inputs that produced each output, and visually indicates which parts of your workflow are stale.
+`daggr` is a Python library for building AI workflows that connect [Gradio](https://github.com/gradio-app/gradio) apps, ML models (through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index)), and custom Python functions. It automatically generates a visual canvas for your workflow allowing you to inspect intermediate outputs, rerun any step any number of times, and preserves state for complex or long-running workflows. Daggr also tracks provenance: when you browse through previous results, it automatically restores the exact inputs that produced each output, and visually indicates which parts of your workflow are stale.
 
 
 
