@@ -25,9 +25,9 @@
 	let reconnectTimer: number | null = null;
 
 	let inputValues = $state<Record<string, Record<string, any>>>({});
-	let pendingRunIds = $state<Record<string, string[]>>({});
-	let runIdToNodes = $state<Record<string, string[]>>({});
+	let runningNodes = $state<Set<string>>(new Set());
 	let nodeResults = $state<Record<string, any[]>>({});
+	let nodeInputsSnapshots = $state<Record<string, (Record<string, any> | null)[]>>({});
 	let selectedResultIndex = $state<Record<string, number>>({});
 	let itemListValues = $state<Record<string, Record<number, Record<string, any>>>>({});
 	let selectedVariants = $state<Record<string, number>>({});
@@ -49,7 +49,38 @@
 	let saveDebounceTimer: number | null = null;
 	let transformDebounceTimer: number | null = null;
 
-	const globalProcessedSet = new Set<string>();
+	let showLoginTooltip = $state(false);
+	let tokenInputValue = $state('');
+	let loginLoading = $state(false);
+	let loginError = $state('');
+	let hasShownPersistencePrompt = $state(false);
+
+	const HF_TOKEN_KEY = 'daggr_hf_token';
+
+	function getStoredToken(): string | null {
+		try {
+			return localStorage.getItem(HF_TOKEN_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	function storeToken(token: string) {
+		try {
+			localStorage.setItem(HF_TOKEN_KEY, token);
+		} catch {
+			console.warn('[daggr] Could not store token in localStorage');
+		}
+	}
+
+	function clearStoredToken() {
+		try {
+			localStorage.removeItem(HF_TOKEN_KEY);
+		} catch {
+			console.warn('[daggr] Could not clear token from localStorage');
+		}
+	}
+
 	let timerInterval: number | null = null;
 
 	let nodes = $derived(graphData?.nodes || []);
@@ -64,20 +95,11 @@
 	}
 
 	function stopTimerIfNoRunning() {
-		const hasRunning = Object.values(pendingRunIds).some(ids => ids.length > 0);
-		if (!hasRunning && timerInterval) {
+		if (runningNodes.size === 0 && timerInterval) {
 			clearInterval(timerInterval);
 			timerInterval = null;
 		}
 	}
-
-	let runningCounts = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		for (const [nodeName, ids] of Object.entries(pendingRunIds)) {
-			counts[nodeName] = ids.length;
-		}
-		return counts;
-	});
 
 	const NODE_WIDTH = 280;
 	const HEADER_HEIGHT = 36;
@@ -92,7 +114,12 @@
 
 	async function fetchUserInfo() {
 		try {
-			const response = await fetch('/api/user_info');
+			const token = getStoredToken();
+			const headers: Record<string, string> = {};
+			if (token) {
+				headers['Authorization'] = `Bearer ${token}`;
+			}
+			const response = await fetch('/api/user_info', { headers });
 			if (response.ok) {
 				const data = await response.json();
 				hfUser = data.hf_user;
@@ -107,10 +134,76 @@
 		return null;
 	}
 
+	async function handleLogin() {
+		if (!tokenInputValue.trim()) {
+			loginError = 'Please enter a token';
+			return;
+		}
+		loginLoading = true;
+		loginError = '';
+		try {
+			const response = await fetch('/api/auth/login', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ token: tokenInputValue.trim() })
+			});
+			const data = await response.json();
+			if (response.ok && data.success) {
+				storeToken(tokenInputValue.trim());
+				hfUser = data.hf_user;
+				showLoginTooltip = false;
+				tokenInputValue = '';
+				await fetchUserInfo();
+				await fetchSheets();
+				
+				if (sheets.length > 0) {
+					currentSheetId = sheets[0].sheet_id;
+				} else if (canPersist) {
+					await createSheet('Sheet 1');
+				}
+				
+				if (ws && wsConnected) {
+					const token = getStoredToken();
+					ws.send(JSON.stringify({ action: 'set_sheet', sheet_id: currentSheetId, hf_token: token }));
+					ws.send(JSON.stringify({ action: 'get_graph', sheet_id: currentSheetId, hf_token: token }));
+				}
+			} else {
+				loginError = data.error || 'Invalid token';
+			}
+		} catch (e) {
+			loginError = 'Failed to verify token';
+		} finally {
+			loginLoading = false;
+		}
+	}
+
+	async function handleLogout() {
+		clearStoredToken();
+		hfUser = null;
+		await fetchUserInfo();
+		await fetchSheets();
+		
+		if (sheets.length > 0) {
+			currentSheetId = sheets[0].sheet_id;
+		} else {
+			currentSheetId = null;
+		}
+		
+		if (ws && wsConnected) {
+			ws.send(JSON.stringify({ action: 'set_sheet', sheet_id: currentSheetId, hf_token: null }));
+			ws.send(JSON.stringify({ action: 'get_graph', sheet_id: currentSheetId, hf_token: null }));
+		}
+	}
+
 	async function fetchSheets() {
 		if (!canPersist) return;
 		try {
-			const response = await fetch('/api/sheets');
+			const token = getStoredToken();
+			const headers: Record<string, string> = {};
+			if (token) {
+				headers['Authorization'] = `Bearer ${token}`;
+			}
+			const response = await fetch('/api/sheets', { headers });
 			if (response.ok) {
 				const data = await response.json();
 				sheets = data.sheets || [];
@@ -123,9 +216,14 @@
 	async function createSheet(name?: string) {
 		if (!canPersist) return;
 		try {
+			const token = getStoredToken();
+			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+			if (token) {
+				headers['Authorization'] = `Bearer ${token}`;
+			}
 			const response = await fetch('/api/sheets', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers,
 				body: JSON.stringify({ name })
 			});
 			if (response.ok) {
@@ -141,9 +239,14 @@
 
 	async function renameSheet(sheetId: string, newName: string) {
 		try {
+			const token = getStoredToken();
+			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+			if (token) {
+				headers['Authorization'] = `Bearer ${token}`;
+			}
 			const response = await fetch(`/api/sheets/${sheetId}`, {
 				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
+				headers,
 				body: JSON.stringify({ name: newName })
 			});
 			if (response.ok) {
@@ -157,7 +260,12 @@
 	async function deleteSheet(sheetId: string) {
 		if (!confirm('Delete this sheet and all its data?')) return;
 		try {
-			const response = await fetch(`/api/sheets/${sheetId}`, { method: 'DELETE' });
+			const token = getStoredToken();
+			const headers: Record<string, string> = {};
+			if (token) {
+				headers['Authorization'] = `Bearer ${token}`;
+			}
+			const response = await fetch(`/api/sheets/${sheetId}`, { method: 'DELETE', headers });
 			if (response.ok) {
 				sheets = sheets.filter(s => s.sheet_id !== sheetId);
 				if (currentSheetId === sheetId) {
@@ -180,11 +288,10 @@
 		inputValues = {};
 		itemListValues = {};
 		selectedVariants = {};
-		pendingRunIds = {};
+		runningNodes = new Set();
 		nodeStartTimes = {};
 		nodeExecutionTimes = {};
 		nodeErrors = {};
-		globalProcessedSet.clear();
 		if (timerInterval) {
 			clearInterval(timerInterval);
 			timerInterval = null;
@@ -197,8 +304,9 @@
 		transform = { x: 0, y: 0, scale: 1 };
 		
 		if (ws && wsConnected) {
-			ws.send(JSON.stringify({ action: 'set_sheet', sheet_id: sheetId }));
-			ws.send(JSON.stringify({ action: 'get_graph', sheet_id: sheetId }));
+			const token = getStoredToken();
+			ws.send(JSON.stringify({ action: 'set_sheet', sheet_id: sheetId, hf_token: token }));
+			ws.send(JSON.stringify({ action: 'get_graph', sheet_id: sheetId, hf_token: token }));
 		}
 		
 		sheetDropdownOpen = false;
@@ -237,10 +345,11 @@
 			wsConnected = true;
 			reconnectAttempts = 0;
 			
+			const token = getStoredToken();
 			if (canPersist && currentSheetId) {
-				ws?.send(JSON.stringify({ action: 'get_graph', sheet_id: currentSheetId }));
+				ws?.send(JSON.stringify({ action: 'get_graph', sheet_id: currentSheetId, hf_token: token }));
 			} else {
-				ws?.send(JSON.stringify({ action: 'get_graph' }));
+				ws?.send(JSON.stringify({ action: 'get_graph', hf_token: token }));
 			}
 		};
 		
@@ -285,7 +394,12 @@
 					if (results && results.length > 0) {
 						const node = data.data.nodes?.find((n: GraphNode) => n.name === nodeName);
 						if (node && node.output_components?.length > 0) {
-							nodeResults[nodeName] = results.map((result: any) => {
+							const snapshots: (Record<string, any> | null)[] = [];
+							nodeResults[nodeName] = results.map((entry: any) => {
+								const result = entry?.result !== undefined ? entry.result : entry;
+								const inputsSnapshot = entry?.inputs_snapshot || null;
+								snapshots.push(inputsSnapshot);
+								
 								return node.output_components.map((comp: GradioComponentData) => {
 									if (result === null || result === undefined) {
 										return { ...comp, value: comp.value };
@@ -304,6 +418,7 @@
 									return { ...comp, value: result[comp.port_name] };
 								});
 							});
+							nodeInputsSnapshots[nodeName] = snapshots;
 							selectedResultIndex[nodeName] = nodeResults[nodeName].length - 1;
 						}
 					}
@@ -330,6 +445,8 @@
 		} else if (data.type === 'node_started') {
 			const startedNode = data.started_node;
 			if (startedNode) {
+				runningNodes.add(startedNode);
+				runningNodes = new Set(runningNodes);
 				nodeStartTimes[startedNode] = Date.now();
 				delete nodeErrors[startedNode];
 				startTimer();
@@ -340,38 +457,16 @@
 			if (errorNode) {
 				nodeErrors[errorNode] = data.error;
 				delete nodeStartTimes[errorNode];
-				if (pendingRunIds[errorNode]) {
-					pendingRunIds[errorNode] = [];
-				}
+				runningNodes.delete(errorNode);
+				runningNodes = new Set(runningNodes);
 				stopTimerIfNoRunning();
 			}
 		} else if (data.type === 'node_complete' || data.type === 'error') {
-			const runId = data.run_id;
 			const completedNode = data.completed_node;
 			
-			if (runId && completedNode) {
-				const completionKey = `${runId}:${completedNode}`;
-				
-				if (!globalProcessedSet.has(completionKey)) {
-					globalProcessedSet.add(completionKey);
-					
-					if (pendingRunIds[completedNode]) {
-						pendingRunIds[completedNode] = pendingRunIds[completedNode].filter(id => id !== runId);
-					}
-					
-					const executedNodes = runIdToNodes[runId];
-					if (executedNodes) {
-						const allDone = executedNodes.every(n => globalProcessedSet.has(`${runId}:${n}`));
-						if (allDone) {
-							delete runIdToNodes[runId];
-							setTimeout(() => {
-								for (const n of executedNodes) {
-									globalProcessedSet.delete(`${runId}:${n}`);
-								}
-							}, 1000);
-						}
-					}
-				}
+			if (completedNode) {
+				runningNodes.delete(completedNode);
+				runningNodes = new Set(runningNodes);
 			}
 			
 			if (completedNode && data.execution_time_ms != null) {
@@ -398,9 +493,22 @@
 							if (!nodeResults[completedNode]) {
 								nodeResults[completedNode] = [];
 							}
+							if (!nodeInputsSnapshots[completedNode]) {
+								nodeInputsSnapshots[completedNode] = [];
+							}
 							const resultSnapshot = node.output_components.map((c: GradioComponentData) => ({ ...c }));
 							nodeResults[completedNode] = [...nodeResults[completedNode], resultSnapshot];
+							const snapshot = data.inputs || data.selected_results ? {
+								inputs: data.inputs || {},
+								selected_results: data.selected_results || {},
+							} : null;
+							nodeInputsSnapshots[completedNode] = [...nodeInputsSnapshots[completedNode], snapshot];
 							selectedResultIndex[completedNode] = nodeResults[completedNode].length - 1;
+
+							if (isOnSpaces && !hfUser && !hasShownPersistencePrompt) {
+								hasShownPersistencePrompt = true;
+								showLoginTooltip = true;
+							}
 						}
 					}
 				}
@@ -624,6 +732,7 @@
 			d: string; 
 			is_scattered: boolean; 
 			is_gathered: boolean;
+			isStale: boolean;
 			forkPaths?: string[];
 		}[] = [];
 		
@@ -652,6 +761,21 @@
 			const is_scattered = edge.is_scattered || false;
 			const is_gathered = edge.is_gathered || false;
 
+			const toNodeSelectedIdx = selectedResultIndex[toNode.name];
+			const toNodeSnapshot = nodeInputsSnapshots[toNode.name]?.[toNodeSelectedIdx];
+			
+			let isStale = false;
+			if (toNodeSnapshot == null) {
+				isStale = true;
+			} else {
+				if (selectedResultIndex[fromNode.name] !== toNodeSnapshot.selected_results?.[fromNode.name]) {
+					isStale = true;
+				}
+				if (JSON.stringify(inputValues[fromNode.id]) !== JSON.stringify(toNodeSnapshot.inputs?.[fromNode.id])) {
+					isStale = true;
+				}
+			}
+
 			let forkPaths: string[] = [];
 
 			if (is_scattered) {
@@ -663,7 +787,7 @@
 					`M ${forkStart} ${y2} L ${x2} ${y2}`,
 					`M ${forkStart} ${y2} L ${x2} ${y2 + forkSpread}`,
 				];
-				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale, forkPaths });
 			} else if (is_gathered) {
 				const forkEnd = x1 + 30;
 				const forkSpread = 8;
@@ -673,10 +797,10 @@
 					`M ${x1} ${y1 + forkSpread} L ${forkEnd} ${y1}`,
 				];
 				const d = `M ${forkEnd} ${y1} C ${forkEnd + cp - 30} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
-				paths.push({ id: edge.id, d, is_scattered, is_gathered, forkPaths });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale, forkPaths });
 			} else {
 				const d = `M ${x1} ${y1} C ${x1 + cp} ${y1}, ${x2 - cp} ${y2}, ${x2} ${y2}`;
-				paths.push({ id: edge.id, d, is_scattered, is_gathered });
+				paths.push({ id: edge.id, d, is_scattered, is_gathered, isStale });
 			}
 		}
 		
@@ -794,28 +918,19 @@
 	function handleRunToNode(e: MouseEvent, nodeName: string) {
 		e.stopPropagation();
 		
-		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-		const ancestors = getAncestors(nodeName);
-		const nodesToExecute = [...ancestors, nodeName];
-		
-		const nodesToMark = nodesToExecute.filter(n => {
-			if (n === nodeName) return true;
-			const results = nodeResults[n];
-			if (results && results.length > 0) return false;
-			const node = nodes.find(nd => nd.name === n);
-			if (node && hasUserProvidedOutput(node)) return false;
-			return true;
-		});
-		
-		for (const nodeToMark of nodesToMark) {
-			if (!pendingRunIds[nodeToMark]) {
-				pendingRunIds[nodeToMark] = [];
-			}
-			pendingRunIds[nodeToMark] = [...pendingRunIds[nodeToMark], runId];
-			delete nodeExecutionTimes[nodeToMark];
+		if (runningNodes.has(nodeName)) {
+			return;
 		}
 		
-		runIdToNodes[runId] = nodesToMark;
+		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+		
+		runningNodes.add(nodeName);
+		const ancestors = getAncestors(nodeName);
+		for (const ancestor of ancestors) {
+			runningNodes.add(ancestor);
+		}
+		runningNodes = new Set(runningNodes);
+		delete nodeExecutionTimes[nodeName];
 		
 		if (ws && wsConnected) {
 			ws.send(JSON.stringify({
@@ -825,7 +940,8 @@
 				item_list_values: itemListValues,
 				selected_results: selectedResultIndex,
 				run_id: runId,
-				sheet_id: currentSheetId
+				sheet_id: currentSheetId,
+				hf_token: getStoredToken()
 			}));
 		}
 	}
@@ -855,11 +971,51 @@
 		return nodeResults[nodeName]?.length || 0;
 	}
 
+	function restoreInputsSnapshot(nodeName: string, index: number) {
+		const snapshots = nodeInputsSnapshots[nodeName];
+		if (!snapshots || !snapshots[index]) return;
+		
+		const snapshot = snapshots[index];
+		
+		const inputs = snapshot.inputs || snapshot;
+		for (const [inputNodeId, nodeInputs] of Object.entries(inputs)) {
+			if (typeof nodeInputs === 'object' && nodeInputs !== null) {
+				inputValues[inputNodeId] = { ...inputValues[inputNodeId], ...nodeInputs };
+			}
+		}
+		
+		if (snapshot.selected_results) {
+			for (const [upstreamNode, resultIdx] of Object.entries(snapshot.selected_results)) {
+				if (upstreamNode === nodeName) continue;
+				if (typeof resultIdx === 'number') {
+					selectedResultIndex[upstreamNode] = resultIdx;
+				}
+			}
+		}
+	}
+
+	function autoMatchDownstream(changedNode: string, newIndex: number) {
+		for (const [nodeName, snapshots] of Object.entries(nodeInputsSnapshots)) {
+			if (!snapshots || nodeName === changedNode) continue;
+			const matchIdx = snapshots.findIndex(
+				s => s?.selected_results?.[changedNode] === newIndex
+			);
+			if (matchIdx !== -1) {
+				selectedResultIndex[nodeName] = matchIdx;
+				autoMatchDownstream(nodeName, matchIdx);
+			}
+		}
+	}
+
 	function prevResult(e: MouseEvent, nodeName: string) {
 		e.stopPropagation();
 		const current = selectedResultIndex[nodeName] ?? 0;
 		if (current > 0) {
-			selectedResultIndex[nodeName] = current - 1;
+			const newIndex = current - 1;
+			selectedResultIndex[nodeName] = newIndex;
+			selectedResultIndex = { ...selectedResultIndex };
+			restoreInputsSnapshot(nodeName, newIndex);
+			autoMatchDownstream(nodeName, newIndex);
 		}
 	}
 
@@ -868,7 +1024,11 @@
 		const total = getResultCount(nodeName);
 		const current = selectedResultIndex[nodeName] ?? 0;
 		if (current < total - 1) {
-			selectedResultIndex[nodeName] = current + 1;
+			const newIndex = current + 1;
+			selectedResultIndex[nodeName] = newIndex;
+			selectedResultIndex = { ...selectedResultIndex };
+			restoreInputsSnapshot(nodeName, newIndex);
+			autoMatchDownstream(nodeName, newIndex);
 		}
 	}
 
@@ -896,7 +1056,7 @@
 			return { text: 'Error', isRunning: false, isError: true };
 		}
 		
-		const isRunning = (pendingRunIds[nodeName]?.length ?? 0) > 0;
+		const isRunning = runningNodes.has(nodeName);
 		const startTime = nodeStartTimes[nodeName];
 		const finalTime = nodeExecutionTimes[nodeName];
 		const avgData = nodeAvgTimes[nodeName];
@@ -964,10 +1124,10 @@
 	>
 		<svg class="edges-svg">
 			{#each edgePaths as edge (edge.id)}
-				<path d={edge.d} class="edge-path" />
+				<path d={edge.d} class="edge-path" class:stale={edge.isStale} />
 				{#if edge.forkPaths}
 					{#each edge.forkPaths as forkD}
-						<path d={forkD} class="edge-path edge-fork" />
+						<path d={forkD} class="edge-path edge-fork" class:stale={edge.isStale} />
 					{/each}
 				{/if}
 			{/each}
@@ -993,9 +1153,10 @@
 					{#if !node.is_input_node}
 						<span 
 							class="run-btn"
-							class:running={runningCounts[node.name] > 0}
+							class:running={runningNodes.has(node.name)}
+							class:disabled={runningNodes.has(node.name)}
 							onclick={(e) => handleRunToNode(e, node.name)}
-							title={node.is_map_node ? "Run all items" : "Run to here"}
+							title={runningNodes.has(node.name) ? "Running..." : (node.is_map_node ? "Run all items" : "Run to here")}
 							role="button"
 							tabindex="0"
 						>
@@ -1009,8 +1170,8 @@
 									<path d="M1 1 L9 6 L1 11 Z"/>
 								</svg>
 							{/if}
-							{#if runningCounts[node.name] > 0}
-								<span class="run-badge">{runningCounts[node.name]}</span>
+							{#if runningNodes.has(node.name)}
+								<span class="run-badge"></span>
 							{/if}
 						</span>
 					{/if}
@@ -1200,13 +1361,44 @@
 				<img src={hfUser.avatar_url} alt="" class="hf-avatar" />
 			{/if}
 			<span class="hf-username">{hfUser.username}</span>
+			<button class="logout-btn" onclick={handleLogout} title="Logout">×</button>
 			<div class="hf-tooltip">
-				Your Hugging Face token is automatically used for all GradioNode and InferenceNode calls. This enables ZeroGPU quota tracking and access to private Spaces and gated models.
+				Your Hugging Face token is used for all GradioNode and InferenceNode calls. This enables ZeroGPU quota tracking and access to private Spaces and gated models.
 			</div>
 		</div>
-	{:else if isOnSpaces}
-		<div class="login-prompt">
-			<span>Login to save your work</span>
+	{:else}
+		<div class="login-section">
+			<button class="login-btn" onclick={() => showLoginTooltip = !showLoginTooltip} title="Login with Hugging Face">
+				<img src="/daggr-assets/hf-logo-pirate.png" alt="HF" class="hf-logo-icon" />
+				<span>Login</span>
+			</button>
+			{#if showLoginTooltip}
+				<div class="login-tooltip">
+					<div class="login-tooltip-header">Login with Hugging Face</div>
+					{#if isOnSpaces}
+						<p class="login-tooltip-desc login-tooltip-highlight">
+							Login to save your outputs and resume your work later.
+						</p>
+					{/if}
+					<p class="login-tooltip-desc">
+						Your token is used to authenticate with Hugging Face APIs for InferenceNode calls and ZeroGPU-powered Spaces. Create a token with <strong>Read</strong> scope (or <strong>Fine-grained</strong> with Inference API access) at <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">huggingface.co/settings/tokens</a>
+					</p>
+					<input
+						type="password"
+						class="login-token-input"
+						placeholder="hf_..."
+						bind:value={tokenInputValue}
+						onkeydown={(e) => e.key === 'Enter' && handleLogin()}
+						disabled={loginLoading}
+					/>
+					{#if loginError}
+						<div class="login-error">{loginError}</div>
+					{/if}
+					<button class="login-submit-btn" onclick={handleLogin} disabled={loginLoading}>
+						{loginLoading ? 'Verifying...' : 'Login'}
+					</button>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -1463,17 +1655,151 @@
 		visibility: visible;
 	}
 
-	.login-prompt {
+	.logout-btn {
+		background: transparent;
+		border: none;
+		color: #666;
+		font-size: 16px;
+		cursor: pointer;
+		padding: 0 4px;
+		margin-left: 4px;
+		line-height: 1;
+		opacity: 0;
+		transition: opacity 0.2s, color 0.2s;
+	}
+
+	.hf-user:hover .logout-btn {
+		opacity: 1;
+	}
+
+	.logout-btn:hover {
+		color: #f97316;
+	}
+
+	.login-section {
 		position: fixed;
 		top: 16px;
 		right: 16px;
+		z-index: 100;
+	}
+
+	.login-btn {
 		background: rgba(20, 20, 20, 0.9);
 		border: 1px solid rgba(249, 115, 22, 0.2);
 		border-radius: 8px;
-		padding: 8px 14px;
-		z-index: 100;
+		padding: 8px 12px;
+		color: #888;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+		transition: all 0.2s;
+	}
+
+	.login-btn:hover {
+		border-color: rgba(249, 115, 22, 0.4);
+		color: #f97316;
+	}
+
+	.hf-logo-icon {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+	}
+
+	.login-tooltip {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		background: rgba(20, 20, 20, 0.98);
+		border: 1px solid rgba(249, 115, 22, 0.3);
+		border-radius: 10px;
+		padding: 16px;
+		width: 280px;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	}
+
+	.login-tooltip-header {
+		font-size: 14px;
+		font-weight: 600;
+		color: #f97316;
+		margin-bottom: 8px;
+	}
+
+	.login-tooltip-desc {
 		font-size: 12px;
 		color: #888;
+		margin: 0 0 12px 0;
+		line-height: 1.4;
+	}
+
+	.login-tooltip-desc a {
+		color: #f97316;
+		text-decoration: none;
+	}
+
+	.login-tooltip-desc a:hover {
+		text-decoration: underline;
+	}
+
+	.login-tooltip-highlight {
+		background: rgba(249, 115, 22, 0.15);
+		border: 1px solid rgba(249, 115, 22, 0.3);
+		border-radius: 6px;
+		padding: 8px 10px;
+		color: #f97316;
+		font-weight: 500;
+	}
+
+	.login-token-input {
+		width: 100%;
+		padding: 10px 12px;
+		background: rgba(0, 0, 0, 0.3);
+		border: 1px solid rgba(249, 115, 22, 0.2);
+		border-radius: 6px;
+		color: #fff;
+		font-size: 13px;
+		font-family: 'SF Mono', Monaco, monospace;
+		margin-bottom: 8px;
+		box-sizing: border-box;
+	}
+
+	.login-token-input:focus {
+		outline: none;
+		border-color: rgba(249, 115, 22, 0.5);
+	}
+
+	.login-token-input::placeholder {
+		color: #555;
+	}
+
+	.login-error {
+		font-size: 11px;
+		color: #ef4444;
+		margin-bottom: 8px;
+	}
+
+	.login-submit-btn {
+		width: 100%;
+		padding: 10px;
+		background: #f97316;
+		border: none;
+		border-radius: 6px;
+		color: #000;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+
+	.login-submit-btn:hover:not(:disabled) {
+		background: #fb923c;
+	}
+
+	.login-submit-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.zoom-controls {
@@ -1550,6 +1876,11 @@
 		stroke: #f97316;
 		stroke-width: 2.5;
 		stroke-linecap: round;
+		transition: stroke 0.2s ease;
+	}
+
+	.edge-path.stale {
+		stroke: #6b7280;
 	}
 
 	.edge-fork {

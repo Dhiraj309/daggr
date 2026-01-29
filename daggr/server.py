@@ -4,28 +4,70 @@ import asyncio
 import json
 import mimetypes
 import os
+import socket
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
-from daggr.executor import SequentialExecutor
+from daggr.executor import AsyncExecutor
+from daggr.session import ExecutionSession
 from daggr.state import SessionState
 
 if TYPE_CHECKING:
     from daggr.graph import Graph
 
 
+INITIAL_PORT_VALUE = int(os.getenv("DAGGR_SERVER_PORT", "7860"))
+TRY_NUM_PORTS = int(os.getenv("DAGGR_NUM_PORTS", "100"))
+
+
+def _find_available_port(host: str, start_port: int) -> int:
+    """Find an available port starting from start_port."""
+    for port in range(start_port, start_port + TRY_NUM_PORTS):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host if host != "0.0.0.0" else "127.0.0.1", port))
+            s.close()
+            return port
+        except OSError:
+            continue
+    raise OSError(
+        f"Cannot find empty port in range: {start_port}-{start_port + TRY_NUM_PORTS - 1}. "
+        f"You can specify a different port by setting the DAGGR_SERVER_PORT environment variable "
+        f"or passing the port parameter to launch()."
+    )
+
+
 class DaggrServer:
     def __init__(self, graph: Graph):
         self.graph = graph
-        self.executor = SequentialExecutor(graph)
+        self.executor = AsyncExecutor(graph)
         self.state = SessionState()
         self.app = FastAPI(title=graph.name)
         self.connections: dict[str, WebSocket] = {}
         self._setup_routes()
+
+    def _extract_token_from_header(self, authorization: str | None) -> str | None:
+        if authorization and authorization.startswith("Bearer "):
+            return authorization[7:]
+        return None
+
+    def _validate_hf_token(self, token: str) -> dict | None:
+        try:
+            from huggingface_hub import whoami
+
+            info = whoami(token=token, cache=True)
+            return {
+                "username": info.get("name"),
+                "fullname": info.get("fullname"),
+                "avatar_url": info.get("avatarUrl"),
+            }
+        except Exception:
+            return None
 
     def _setup_routes(self):
         frontend_dir = Path(__file__).parent / "frontend" / "dist"
@@ -44,8 +86,12 @@ class DaggrServer:
             return self._get_hf_user_info()
 
         @self.app.get("/api/user_info")
-        async def get_user_info():
-            hf_user = self._get_hf_user_info()
+        async def get_user_info(authorization: str | None = Header(default=None)):
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             is_on_spaces = os.environ.get("SPACE_ID") is not None
             persistence_enabled = self.graph.persist_key is not None
@@ -56,11 +102,33 @@ class DaggrServer:
                 "can_persist": user_id is not None and persistence_enabled,
             }
 
+        @self.app.post("/api/auth/login")
+        async def auth_login(request: Request):
+            try:
+                body = await request.json()
+                token = body.get("token")
+                if not token:
+                    return JSONResponse({"error": "Token is required"}, status_code=400)
+                hf_user = self._validate_hf_token(token)
+                if not hf_user:
+                    return JSONResponse({"error": "Invalid token"}, status_code=401)
+                return {"hf_user": hf_user, "success": True}
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=500)
+
+        @self.app.post("/api/auth/logout")
+        async def auth_logout():
+            return {"success": True}
+
         @self.app.get("/api/sheets")
-        async def list_sheets():
+        async def list_sheets(authorization: str | None = Header(default=None)):
             if not self.graph.persist_key:
                 return {"sheets": [], "user_id": None}
-            hf_user = self._get_hf_user_info()
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             if not user_id:
                 return JSONResponse(
@@ -71,13 +139,19 @@ class DaggrServer:
             return {"sheets": sheets, "user_id": user_id}
 
         @self.app.post("/api/sheets")
-        async def create_sheet(request: Request):
+        async def create_sheet(
+            request: Request, authorization: str | None = Header(default=None)
+        ):
             if not self.graph.persist_key:
                 return JSONResponse(
                     {"error": "Persistence is disabled for this graph"},
                     status_code=400,
                 )
-            hf_user = self._get_hf_user_info()
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             if not user_id:
                 return JSONResponse(
@@ -91,8 +165,16 @@ class DaggrServer:
             return {"sheet": sheet}
 
         @self.app.patch("/api/sheets/{sheet_id}")
-        async def rename_sheet(sheet_id: str, request: Request):
-            hf_user = self._get_hf_user_info()
+        async def rename_sheet(
+            sheet_id: str,
+            request: Request,
+            authorization: str | None = Header(default=None),
+        ):
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             if not user_id:
                 return JSONResponse({"error": "Login required"}, status_code=401)
@@ -109,8 +191,14 @@ class DaggrServer:
             return {"success": True, "sheet": self.state.get_sheet(sheet_id)}
 
         @self.app.delete("/api/sheets/{sheet_id}")
-        async def delete_sheet(sheet_id: str):
-            hf_user = self._get_hf_user_info()
+        async def delete_sheet(
+            sheet_id: str, authorization: str | None = Header(default=None)
+        ):
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             if not user_id:
                 return JSONResponse({"error": "Login required"}, status_code=401)
@@ -123,8 +211,14 @@ class DaggrServer:
             return {"success": True}
 
         @self.app.get("/api/sheets/{sheet_id}/state")
-        async def get_sheet_state(sheet_id: str):
-            hf_user = self._get_hf_user_info()
+        async def get_sheet_state(
+            sheet_id: str, authorization: str | None = Header(default=None)
+        ):
+            browser_token = self._extract_token_from_header(authorization)
+            if browser_token:
+                hf_user = self._validate_hf_token(browser_token)
+            else:
+                hf_user = self._get_hf_user_info()
             user_id = self.state.get_effective_user_id(hf_user)
             if not user_id:
                 return JSONResponse({"error": "Login required"}, status_code=401)
@@ -138,11 +232,12 @@ class DaggrServer:
 
         @self.app.post("/api/run/{node_name}")
         async def run_to_node(node_name: str, data: dict):
+            session = ExecutionSession(self.graph)
             session_id = data.get("session_id")
             input_values = data.get("inputs", {})
             selected_results = data.get("selected_results", {})
-            return self._execute_to_node(
-                node_name, session_id, input_values, selected_results
+            return await self._execute_to_node(
+                session, node_name, session_id, input_values, selected_results
             )
 
         @self.app.get("/api/schema")
@@ -166,10 +261,55 @@ class DaggrServer:
             user_id = self.state.get_effective_user_id(hf_user)
             current_sheet_id: str | None = None
 
+            session = ExecutionSession(self.graph)
+            running_tasks: set[asyncio.Task] = set()
+
+            async def run_node_execution(
+                node_name: str,
+                sheet_id: str | None,
+                input_values: dict,
+                item_list_values: dict,
+                selected_results: dict,
+                run_id: str,
+                user_id: str | None,
+            ):
+                try:
+                    async for result in self._execute_to_node_streaming(
+                        session,
+                        node_name,
+                        sheet_id,
+                        input_values,
+                        item_list_values,
+                        selected_results,
+                        run_id,
+                        user_id,
+                    ):
+                        await websocket.send_json(result)
+                except Exception as e:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "run_id": run_id,
+                            "error": str(e),
+                            "node": node_name,
+                        }
+                    )
+
             try:
                 while True:
                     data = await websocket.receive_json()
                     action = data.get("action")
+
+                    if "hf_token" in data:
+                        browser_hf_token = data.get("hf_token")
+                        if browser_hf_token:
+                            hf_user = self._validate_hf_token(browser_hf_token)
+                            user_id = self.state.get_effective_user_id(hf_user)
+                            session.set_hf_token(browser_hf_token)
+                        else:
+                            hf_user = self._get_hf_user_info()
+                            user_id = self.state.get_effective_user_id(hf_user)
+                            session.set_hf_token(None)
 
                     if action == "run":
                         node_name = data.get("node_name")
@@ -179,16 +319,19 @@ class DaggrServer:
                         run_id = data.get("run_id")
                         sheet_id = data.get("sheet_id") or current_sheet_id
 
-                        async for result in self._execute_to_node_streaming(
-                            node_name,
-                            sheet_id,
-                            input_values,
-                            item_list_values,
-                            selected_results,
-                            run_id,
-                            user_id,
-                        ):
-                            await websocket.send_json(result)
+                        task = asyncio.create_task(
+                            run_node_execution(
+                                node_name,
+                                sheet_id,
+                                input_values,
+                                item_list_values,
+                                selected_results,
+                                run_id,
+                                user_id,
+                            )
+                        )
+                        running_tasks.add(task)
+                        task.add_done_callback(running_tasks.discard)
 
                     elif action == "get_graph":
                         try:
@@ -210,7 +353,14 @@ class DaggrServer:
                             node_results = {}
                             for node_name, results_list in persisted_results.items():
                                 if results_list:
-                                    node_results[node_name] = results_list[-1]
+                                    last_entry = results_list[-1]
+                                    if (
+                                        isinstance(last_entry, dict)
+                                        and "result" in last_entry
+                                    ):
+                                        node_results[node_name] = last_entry["result"]
+                                    else:
+                                        node_results[node_name] = last_entry
 
                             graph_data = self._build_graph_data(
                                 node_results=node_results,
@@ -220,7 +370,7 @@ class DaggrServer:
                             graph_data["sheet_id"] = current_sheet_id
                             graph_data["user_id"] = user_id
                             graph_data["persisted_results"] = (
-                                self._transform_file_paths(persisted_results)
+                                self._transform_persisted_results(persisted_results)
                             )
                             graph_data["transform"] = persisted_transform
 
@@ -262,6 +412,7 @@ class DaggrServer:
                             sheet = self.state.get_sheet(sheet_id)
                             if sheet and sheet["user_id"] == user_id:
                                 current_sheet_id = sheet_id
+                                session.clear_results()
                                 await websocket.send_json(
                                     {"type": "sheet_set", "sheet_id": sheet_id}
                                 )
@@ -285,9 +436,13 @@ class DaggrServer:
                             )
 
             except WebSocketDisconnect:
+                for task in running_tasks:
+                    task.cancel()
                 if session_id in self.connections:
                     del self.connections[session_id]
             except Exception as e:
+                for task in running_tasks:
+                    task.cancel()
                 print(f"[ERROR] WebSocket error: {e}")
                 import traceback
 
@@ -581,6 +736,26 @@ class DaggrServer:
             return [self._transform_file_paths(item) for item in data]
         return data
 
+    def _transform_persisted_results(
+        self, persisted_results: dict[str, list[Any]]
+    ) -> dict[str, list[Any]]:
+        """Transform persisted results, handling both old format (just result)
+        and new format (dict with result and inputs_snapshot)."""
+        transformed: dict[str, list[Any]] = {}
+        for node_name, results_list in persisted_results.items():
+            transformed[node_name] = []
+            for entry in results_list:
+                if isinstance(entry, dict) and "result" in entry:
+                    transformed[node_name].append(
+                        {
+                            "result": self._transform_file_paths(entry["result"]),
+                            "inputs_snapshot": entry.get("inputs_snapshot"),
+                        }
+                    )
+                else:
+                    transformed[node_name].append(self._transform_file_paths(entry))
+        return transformed
+
     def _build_input_components(self, node) -> list[dict[str, Any]]:
         if not node._input_components:
             return []
@@ -775,11 +950,13 @@ class DaggrServer:
         input_values: dict[str, Any] | None = None,
         history: dict[str, dict[str, list[dict]]] | None = None,
         session_id: str | None = None,
+        selected_results: dict[str, int] | None = None,
     ) -> dict:
         node_results = node_results or {}
         node_statuses = node_statuses or {}
         input_values = input_values or {}
         history = history or {}
+        selected_results = selected_results or {}
 
         depths = self._compute_node_depths()
 
@@ -1089,6 +1266,7 @@ class DaggrServer:
             "nodes": nodes,
             "edges": edges,
             "inputs": input_values,
+            "selected_results": selected_results,
             "history": history,
             "session_id": session_id,
         }
@@ -1187,8 +1365,9 @@ class DaggrServer:
             return [self._convert_urls_to_file_values(item) for item in data]
         return data
 
-    def _execute_to_node(
+    async def _execute_to_node(
         self,
+        session: ExecutionSession,
         target_node: str,
         session_id: str | None,
         input_values: dict[str, Any],
@@ -1203,7 +1382,7 @@ class DaggrServer:
             if isinstance(node, ChoiceNode):
                 node_id = node_name.replace(" ", "_").replace("-", "_")
                 variant_idx = input_values.get(node_id, {}).get("_selected_variant", 0)
-                self.executor.selected_variants[node_name] = variant_idx
+                session.selected_variants[node_name] = variant_idx
 
         ancestors = self._get_ancestors(target_node)
         nodes_to_run = ancestors + [target_node]
@@ -1243,7 +1422,12 @@ class DaggrServer:
                         cached
                     )
 
-        self.executor.results = dict(existing_results)
+        for k, v in existing_results.items():
+            if k not in session.results:
+                session.results[k] = v
+
+        if target_node in session.results:
+            del session.results[target_node]
 
         node_results = {}
         node_statuses = {}
@@ -1254,19 +1438,25 @@ class DaggrServer:
                 node_statuses[node_name] = "completed"
                 continue
 
+            if node_name in session.results:
+                node_results[node_name] = session.results[node_name]
+                node_statuses[node_name] = "completed"
+                continue
+
             node_statuses[node_name] = "running"
             user_input = entry_inputs.get(node_name, {})
-            result = self.executor.execute_node(node_name, user_input)
+            result = await self.executor.execute_node(session, node_name, user_input)
             node_results[node_name] = result
             node_statuses[node_name] = "completed"
             self.state.save_result(session_id, node_name, result)
 
         return self._build_graph_data(
-            node_results, node_statuses, input_values, {}, session_id
+            node_results, node_statuses, input_values, {}, session_id, selected_results
         )
 
     async def _execute_to_node_streaming(
         self,
+        session: ExecutionSession,
         target_node: str,
         sheet_id: str | None,
         input_values: dict[str, Any],
@@ -1287,7 +1477,7 @@ class DaggrServer:
             if isinstance(node, ChoiceNode):
                 node_id = node_name.replace(" ", "_").replace("-", "_")
                 variant_idx = input_values.get(node_id, {}).get("_selected_variant", 0)
-                self.executor.selected_variants[node_name] = variant_idx
+                session.selected_variants[node_name] = variant_idx
 
         ancestors = self._get_ancestors(target_node)
         nodes_to_run = ancestors + [target_node]
@@ -1321,7 +1511,11 @@ class DaggrServer:
             if user_output is not None:
                 existing_results[node_name] = user_output
                 if can_persist:
-                    self.state.save_result(sheet_id, node_name, user_output)
+                    snapshot = {
+                        "inputs": input_values,
+                        "selected_results": selected_results,
+                    }
+                    self.state.save_result(sheet_id, node_name, user_output, snapshot)
                 continue
 
             if node_name == target_node:
@@ -1339,7 +1533,12 @@ class DaggrServer:
                         cached
                     )
 
-        self.executor.results = dict(existing_results)
+        for k, v in existing_results.items():
+            if k not in session.results:
+                session.results[k] = v
+
+        if target_node in session.results:
+            del session.results[target_node]
 
         node_results = {}
         node_statuses = {}
@@ -1352,44 +1551,81 @@ class DaggrServer:
                         node_name, result, item_list_values
                     )
                     node_results[node_name] = result
-                    self.executor.results[node_name] = result
+                    session.results[node_name] = result
                     node_statuses[node_name] = "completed"
                     continue
 
-                node_statuses[node_name] = "running"
-                user_input = entry_inputs.get(node_name, {})
+                if node_name in session.results:
+                    result = session.results[node_name]
+                    result = self._apply_item_list_edits(
+                        node_name, result, item_list_values
+                    )
+                    node_results[node_name] = result
+                    node_statuses[node_name] = "completed"
+                    continue
 
-                yield {
-                    "type": "node_started",
-                    "started_node": node_name,
-                    "run_id": run_id,
-                }
+                can_execute = await session.start_node_execution(node_name)
+                if not can_execute:
+                    if node_name == target_node:
+                        return
+                    await session.wait_for_node(node_name)
+                    if node_name in session.results:
+                        result = session.results[node_name]
+                        result = self._apply_item_list_edits(
+                            node_name, result, item_list_values
+                        )
+                        node_results[node_name] = result
+                        node_statuses[node_name] = "completed"
+                        continue
 
-                import time
+                try:
+                    node_statuses[node_name] = "running"
+                    user_input = entry_inputs.get(node_name, {})
 
-                start_time = time.time()
-                result = await asyncio.to_thread(
-                    self.executor.execute_node, node_name, user_input
-                )
-                elapsed_ms = (time.time() - start_time) * 1000
+                    yield {
+                        "type": "node_started",
+                        "started_node": node_name,
+                        "run_id": run_id,
+                    }
 
-                result = self._apply_item_list_edits(
-                    node_name, result, item_list_values
-                )
-                self.executor.results[node_name] = result
-                node_results[node_name] = result
-                node_statuses[node_name] = "completed"
+                    import time
 
-                if can_persist:
-                    self.state.save_result(sheet_id, node_name, result)
+                    start_time = time.time()
+                    result = await self.executor.execute_node(
+                        session, node_name, user_input
+                    )
+                    elapsed_ms = (time.time() - start_time) * 1000
 
-                graph_data = self._build_graph_data(
-                    node_results, node_statuses, input_values, {}, sheet_id
-                )
-                graph_data["type"] = "node_complete"
-                graph_data["completed_node"] = node_name
-                graph_data["run_id"] = run_id
-                graph_data["execution_time_ms"] = elapsed_ms
+                    result = self._apply_item_list_edits(
+                        node_name, result, item_list_values
+                    )
+                    session.results[node_name] = result
+                    node_results[node_name] = result
+                    node_statuses[node_name] = "completed"
+
+                    if can_persist:
+                        current_count = self.state.get_result_count(sheet_id, node_name)
+                        snapshot = {
+                            "inputs": input_values,
+                            "selected_results": selected_results,
+                        }
+                        self.state.save_result(sheet_id, node_name, result, snapshot)
+                        selected_results[node_name] = current_count
+
+                    graph_data = self._build_graph_data(
+                        node_results,
+                        node_statuses,
+                        input_values,
+                        {},
+                        sheet_id,
+                        selected_results,
+                    )
+                    graph_data["type"] = "node_complete"
+                    graph_data["completed_node"] = node_name
+                    graph_data["run_id"] = run_id
+                    graph_data["execution_time_ms"] = elapsed_ms
+                finally:
+                    await session.finish_node_execution(node_name)
                 yield graph_data
 
         except Exception as e:
@@ -1402,7 +1638,12 @@ class DaggrServer:
                     node_results[error_node] = {"error": str(e)}
 
             graph_data = self._build_graph_data(
-                node_results, node_statuses, input_values, {}, sheet_id
+                node_results,
+                node_statuses,
+                input_values,
+                {},
+                sheet_id,
+                selected_results,
             )
             graph_data["type"] = "error"
             graph_data["run_id"] = run_id
@@ -1423,6 +1664,7 @@ class DaggrServer:
             body = {}
 
         input_values = body.get("inputs", {})
+        session = ExecutionSession(self.graph)
 
         subgraphs = self.graph.get_subgraphs()
         output_node_names = set(self.graph.get_output_nodes())
@@ -1466,7 +1708,7 @@ class DaggrServer:
             if isinstance(node, ChoiceNode):
                 node_id = node_name.replace(" ", "_").replace("-", "_")
                 variant_idx = input_values.get(f"{node_id}___selected_variant", 0)
-                self.executor.selected_variants[node_name] = variant_idx
+                session.selected_variants[node_name] = variant_idx
 
         execution_order = self.graph.get_execution_order()
         nodes_to_execute = [n for n in execution_order if n in target_nodes]
@@ -1485,13 +1727,15 @@ class DaggrServer:
                 if node_inputs:
                     entry_inputs[node_name] = node_inputs
 
-        self.executor.results = {}
+        session.results = {}
         node_results = {}
 
         try:
             for node_name in nodes_to_execute:
                 user_input = entry_inputs.get(node_name, {})
-                result = self.executor.execute_node(node_name, user_input)
+                result = await self.executor.execute_node(
+                    session, node_name, user_input
+                )
                 node_results[node_name] = result
         except Exception as e:
             return JSONResponse(
@@ -1528,6 +1772,10 @@ class DaggrServer:
         if port is None:
             port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
 
+        actual_port = _find_available_port(host, port)
+        if actual_port != port:
+            print(f"\n  Port {port} is in use, using {actual_port} instead.")
+
         self.graph._validate_edges()
 
         is_colab = colab_check()
@@ -1541,13 +1789,13 @@ class DaggrServer:
             config = uvicorn.Config(
                 app=self.app,
                 host=host,
-                port=port,
+                port=actual_port,
                 log_level="warning",
             )
             server = _Server(config)
             server.run_in_thread()
 
-            local_url = f"http://{host}:{port}"
+            local_url = f"http://{host}:{actual_port}"
             print(f"\n  daggr running at {local_url}")
 
             share_url = None
@@ -1557,7 +1805,7 @@ class DaggrServer:
                 share_token = secrets.token_urlsafe(32)
                 share_url = setup_tunnel(
                     local_host=host,
-                    local_port=port,
+                    local_port=actual_port,
                     share_token=share_token,
                     share_server_address=None,
                     share_server_tls_certificate=None,
@@ -1584,13 +1832,13 @@ class DaggrServer:
                 print("\nShutting down...")
                 server.close()
         else:
-            local_url = f"http://{host}:{port}"
+            local_url = f"http://{host}:{actual_port}"
             print(f"\n  daggr running at {local_url}\n")
             if open_browser:
                 import threading
 
                 threading.Timer(0.5, lambda: webbrowser.open_new_tab(local_url)).start()
-            uvicorn.run(self.app, host=host, port=port, **kwargs)
+            uvicorn.run(self.app, host=host, port=actual_port, **kwargs)
 
 
 class _Server(uvicorn.Server):

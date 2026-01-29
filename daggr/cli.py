@@ -5,9 +5,31 @@ import importlib.util
 import os
 import re
 import shutil
+import socket
 import sys
 import tempfile
 from pathlib import Path
+
+INITIAL_PORT_VALUE = int(os.getenv("DAGGR_SERVER_PORT", "7860"))
+TRY_NUM_PORTS = int(os.getenv("DAGGR_NUM_PORTS", "100"))
+
+
+def _find_available_port(host: str, start_port: int) -> int:
+    """Find an available port starting from start_port."""
+    for port in range(start_port, start_port + TRY_NUM_PORTS):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host if host != "0.0.0.0" else "127.0.0.1", port))
+            s.close()
+            return port
+        except OSError:
+            continue
+    raise OSError(
+        f"Cannot find empty port in range: {start_port}-{start_port + TRY_NUM_PORTS - 1}. "
+        f"You can specify a different port by setting the DAGGR_SERVER_PORT environment variable "
+        f"or passing the --port parameter."
+    )
 
 
 def find_python_imports(file_path: Path) -> list[Path]:
@@ -85,9 +107,15 @@ def main():
         help="Don't watch daggr source for changes",
     )
     parser.add_argument(
-        "--reset-cache",
+        "--delete-sheets",
         action="store_true",
         help="Delete all cached data (sheets, results, downloaded files) for this project and exit",
+    )
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Skip confirmation prompts (use with --delete-sheets)",
     )
 
     args = parser.parse_args()
@@ -101,8 +129,8 @@ def main():
         print(f"Error: Script must be a Python file: {script_path}")
         sys.exit(1)
 
-    if args.reset_cache:
-        _reset_cache(script_path)
+    if args.delete_sheets:
+        _delete_sheets(script_path, force=args.force)
         sys.exit(0)
 
     watch_daggr = args.watch_daggr and not args.no_watch_daggr
@@ -309,10 +337,10 @@ def _deploy(
         print(f"  Secrets: {list(secrets.keys())}")
 
     local_imports = find_python_imports(script_path)
-    print(f"\n  Files to upload:")
+    print("\n  Files to upload:")
     print(f"    • app.py (from {script_path.name})")
-    print(f"    • requirements.txt")
-    print(f"    • README.md")
+    print("    • requirements.txt")
+    print("    • README.md")
     for imp in local_imports:
         if imp.is_file():
             print(f"    • {imp.name}")
@@ -412,7 +440,7 @@ This Space was deployed using [daggr](https://github.com/gradio-app/daggr).
                     print(f"  Warning: Could not add secret '{secret_name}': {e}")
 
     print(f"\n  ✓ Deployed to https://huggingface.co/spaces/{repo_id}")
-    print(f"    The Space may take a few minutes to build and start.\n")
+    print("    The Space may take a few minutes to build and start.\n")
 
 
 def _get_gradio_version() -> str:
@@ -425,7 +453,7 @@ def _get_gradio_version() -> str:
         return "5.0.0"
 
 
-def _reset_cache(script_path: Path):
+def _delete_sheets(script_path: Path, force: bool = False):
     """Delete all cached data for the project defined in the script."""
     import sqlite3
 
@@ -496,17 +524,20 @@ def _reset_cache(script_path: Path):
     print(f"This will delete {len(sheet_ids)} sheet(s) and all associated data.")
     print(f"Cache location: {cache_dir}\n")
 
-    try:
-        response = input("Are you sure you want to continue? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\nAborted.")
-        conn.close()
-        return
+    if not force:
+        try:
+            response = (
+                input("Are you sure you want to continue? [y/N] ").strip().lower()
+            )
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            conn.close()
+            return
 
-    if response not in ("y", "yes"):
-        print("Aborted.")
-        conn.close()
-        return
+        if response not in ("y", "yes"):
+            print("Aborted.")
+            conn.close()
+            return
 
     for sheet_id in sheet_ids:
         cursor.execute("DELETE FROM node_inputs WHERE sheet_id = ?", (sheet_id,))
@@ -537,6 +568,10 @@ def _run_with_reload(script_path: Path, host: str, port: int, watch_daggr: bool)
     """Run the script with uvicorn hot reload."""
     import uvicorn
 
+    actual_port = _find_available_port(host, port)
+    if actual_port != port:
+        print(f"\n  Port {port} is in use, using {actual_port} instead.")
+
     reload_dirs = [str(script_path.parent)]
 
     local_imports = find_python_imports(script_path)
@@ -559,11 +594,24 @@ def _run_with_reload(script_path: Path, host: str, port: int, watch_daggr: bool)
         print(f"    • {d}")
     print()
 
+    os.environ["DAGGR_PORT"] = str(actual_port)
+
+    import threading
+    import webbrowser
+
+    def open_browser():
+        import time
+
+        time.sleep(1.0)
+        webbrowser.open_new_tab(f"http://{host}:{actual_port}")
+
+    threading.Thread(target=open_browser, daemon=True).start()
+
     uvicorn.run(
         "daggr.cli:_create_app",
         factory=True,
         host=host,
-        port=port,
+        port=actual_port,
         reload=True,
         reload_dirs=reload_dirs,
         reload_includes=reload_includes,

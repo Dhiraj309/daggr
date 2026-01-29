@@ -9,7 +9,7 @@
   </div>
 </h3>
 
-`daggr` is a Python library for building AI workflows that connect [Gradio](https://github.com/gradio-app/gradio) apps, ML models (through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index)), and custom Python functions. It automatically generates a visual canvas for your workflow allowing you to inspect intermediate outputs, rerun any step any number of times, and also preserves state for complex or long-running workflows.
+`daggr` is a Python library for building AI workflows that connect [Gradio](https://github.com/gradio-app/gradio) apps, ML models (through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index)), and custom Python functions. It automatically generates a visual canvas for your workflow allowing you to inspect intermediate outputs, rerun any step any number of times, and preserves state for complex or long-running workflows. Daggr also tracks **provenance**—when you browse through previous results, it automatically restores the exact inputs that produced each output, and visually indicates which parts of your workflow are stale.
 
 
 
@@ -41,7 +41,7 @@ glm_image = GradioNode(
     inputs={
         "prompt": gr.Textbox(  # An input node is created for the prompt
             label="Prompt",
-            value="A cheetah the grassy savanna.",
+            value="A cheetah in the grassy savanna.",
             lines=3,
         ),
         "height": 1024,  # Fixed value (does not appear in the canvas)
@@ -85,6 +85,7 @@ Use Daggr when:
 * You want to define an AI workflow in Python involving Gradio Spaces, inference providers, or custom functions
 * The workflow is complex enough that inspecting intermediate outputs or rerunning individual steps is useful
 * You need a fixed pipeline that you or others can run with different inputs
+* You want to explore variations—generate multiple outputs, compare them, and always know exactly what inputs produced each result
 
 **Why not... ComfyUI?** ComfyUI is a visual node editor where you build workflows by dragging and connecting nodes. Daggr takes a code-first approach: you define workflows in Python and the visual canvas is generated automatically. If you prefer writing code over visual editing, Daggr may be a better fit. In addition, Daggr works with Gradio Spaces and Hugging Face models directly, no need for specialized nodes.
 
@@ -209,6 +210,25 @@ node = FnNode(
 
 Note: If you return a dict or list, it will be treated as a single value (mapped to the first output port), not as a mapping to output ports.
 
+**Concurrency:** By default, FnNodes execute sequentially (one at a time per user session) to prevent resource contention from concurrent function calls. If your function is safe to run in parallel, you can enable concurrent execution:
+
+```python
+# Allow this node to run in parallel with other nodes
+node = FnNode(my_func, concurrent=True)
+
+# Share a resource limit with other nodes (e.g., GPU memory)
+gpu_node_1 = FnNode(process_image, concurrency_group="gpu", max_concurrent=2)
+gpu_node_2 = FnNode(enhance_image, concurrency_group="gpu", max_concurrent=2)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `concurrent` | `False` | If `True`, allow parallel execution |
+| `concurrency_group` | `None` | Name of a group sharing a concurrency limit |
+| `max_concurrent` | `1` | Max parallel executions in the group |
+
+> **Tip:** When possible, prefer `GradioNode` or `InferenceNode` over `FnNode`. These nodes automatically run concurrently (they're external API calls), and your Hugging Face token is automatically passed through for ZeroGPU quota tracking, private Spaces access, and gated model access.
+
 #### `InferenceNode`
 
 Calls a model via [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/en/index). This lets you use models hosted on the Hugging Face Hub without downloading them.
@@ -231,6 +251,33 @@ llm = InferenceNode(
 **Inputs:** The expected inputs depend on the model's task type. For text generation models, use `prompt`. For other tasks, check the model's documentation on the Hub.
 
 **Outputs:** Like other nodes, output names are arbitrary and map to return values in order.
+
+> **Tip:** `InferenceNode` and `GradioNode` automatically run concurrently and pass your HF token for ZeroGPU, private Spaces, and gated models. Prefer these over `FnNode` when possible.
+
+### Node Concurrency
+
+Different node types have different concurrency behaviors:
+
+| Node Type | Concurrency | Why |
+|-----------|-------------|-----|
+| `GradioNode` | **Concurrent** | External API calls—safe to parallelize |
+| `InferenceNode` | **Concurrent** | External API calls—safe to parallelize |
+| `FnNode` | **Sequential** (default) | Local Python code may have resource constraints |
+
+**Why sequential by default for FnNode?** Local Python functions often:
+- Access shared resources (files, databases, GPU memory)
+- Use libraries that aren't thread-safe
+- Consume significant CPU/memory
+
+By running FnNodes sequentially per session, daggr prevents race conditions and resource contention. If your function is safe to run in parallel, opt in with `concurrent=True`.
+
+**Concurrency groups** let multiple nodes share a resource limit:
+
+```python
+# Both nodes share GPU—at most 2 concurrent executions total
+upscale = FnNode(upscale_image, concurrency_group="gpu", max_concurrent=2)
+enhance = FnNode(enhance_image, concurrency_group="gpu", max_concurrent=2)
+```
 
 ### Testing Nodes
 
@@ -270,7 +317,7 @@ Each node's `outputs` dict accepts two types of values:
 | **Gradio component** | `gr.Image(label="Result")` | Displays output in node card |
 | **None** | `None` | Hidden, but can connect to downstream nodes |
 
-### Scatter / Gather
+### Scatter / Gather (experimental)
 
 When a node outputs a list and you want to process each item individually, use `.each` to scatter and `.all()` to gather:
 
@@ -293,7 +340,7 @@ final = FnNode(
 )
 ```
 
-### Choice Nodes
+### Choice Nodes (experimental)
 
 Sometimes you want to offer multiple alternatives for the same step in your workflow—for example, two different TTS providers or image generators. Use the `|` operator to create a **choice node** that lets users switch between variants in the UI:
 
@@ -495,6 +542,50 @@ Daggr automatically saves your workflow state—input values, node results, and 
 Use sheets to work on multiple projects within the same workflow. For example, in a podcast generator app, each sheet could represent a different podcast episode you're working on.
 
 The sheet selector appears in the title bar. Click to switch between sheets, create new ones, rename them (double-click), or delete them.
+
+### Result History and Provenance Tracking
+
+Every time a node runs, Daggr saves not just the output, but also a snapshot of all input values at that moment. This enables powerful exploratory workflows:
+
+**Browsing previous results**: Use the `‹` and `›` arrows in the node footer to navigate through all cached results for that node (shown as "1/3", "2/3", etc.).
+
+**Automatic input restoration**: When you select a previous result, Daggr automatically restores the input values that produced it. This means you can:
+
+1. Generate multiple variations by running a node several times with different inputs
+2. Browse through your results to find the best one
+3. When you select a result, see exactly what inputs created it
+4. Continue your workflow from that point with all the original context intact
+
+**Cascading restoration**: When you toggle through results on a node, Daggr also automatically selects the matching result on downstream nodes (if one exists). For example, if you generated 3 images and removed the background from 2 of them, selecting image #1 will automatically show background-removal result #1.
+
+#### Visual Staleness Indicators
+
+Daggr uses edge colors to show you which parts of your workflow are up-to-date:
+
+| Edge Color | Meaning |
+|------------|---------|
+| **Orange** | Fresh—the downstream node ran with this exact upstream value |
+| **Gray** | Stale—the upstream value has changed, or the downstream hasn't run yet |
+
+<img width="957" height="418" alt="image" src="https://github.com/user-attachments/assets/4acd0ec2-9561-44fc-8a40-d09ab972d717" />
+
+<img width="957" height="418" alt="image" src="https://github.com/user-attachments/assets/683e7cbe-779f-44a9-9401-a6aafc57a936" />
+
+
+Edges are stale when:
+- You edit an input value (e.g., change a text prompt)
+- You select a different cached result on an upstream node
+- A downstream node hasn't been run yet
+
+This visual feedback helps you understand at a glance which results are current and which need to be re-run. It's especially useful in long workflows where you might forget which steps you've already executed with your current inputs.
+
+**Example workflow:**
+1. Generate an image with prompt "A cheetah in the savanna" → edge turns orange
+2. Edit the prompt to "A lion in the jungle" → edge turns gray (stale)
+3. Re-run the image generation → edge turns orange again
+4. Run the background removal node → that edge also turns orange
+
+This provenance tracking is particularly valuable for creative workflows where you're exploring variations and want to always know exactly what inputs produced each output.
 
 ### How Persistence Works
 
