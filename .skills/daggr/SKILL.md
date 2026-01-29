@@ -1,7 +1,7 @@
 ---
 name: daggr
 description: |
-  Build DAG-based AI pipelines connecting Gradio Spaces, HuggingFace models, and Python functions into visual workflows. Use when asked to create a workflow, build a pipeline, connect AI models, chain Gradio Spaces, create a daggr app, build multi-step AI applications, or orchestrate ML models. Triggers on: "build a workflow", "create a pipeline", "connect models", "daggr", "chain spaces", "AI pipeline".
+  Build DAG-based AI pipelines connecting Gradio Spaces, HuggingFace models, and Python functions into visual workflows. Use when asked to create a workflow, build a pipeline, connect AI models, chain Gradio Spaces, create a daggr app, build multi-step AI applications, or orchestrate ML models. Triggers on: "build a workflow", "create a pipeline", "connect models", "daggr", "chain Spaces", "AI pipeline".
 license: MIT
 metadata:
   author: gradio-app
