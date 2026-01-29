@@ -19,7 +19,7 @@ from daggr import GradioNode, FnNode, InferenceNode, Graph, ItemList
 import gradio as gr
 
 graph = Graph(name="My Workflow", nodes=[node1, node2, ...])
-graph.launch()
+graph.launch()  # Starts web server with visual DAG UI
 ```
 
 ## Node Types
@@ -56,7 +56,11 @@ node = FnNode(
 
 ### InferenceNode - [HF Inference Providers](https://huggingface.co/docs/inference-providers)
 
-List available models: https://router.huggingface.co/v1/models
+⏺ text-to-image | image-to-image | image-to-text | image-to-video | text-to-video | text-to-speech | automatic-speech-recognition
+
+Find models by task: `https://huggingface.co/api/models?inference_provider=all&pipeline_tag=text-to-image`
+
+VLM/LLM models only: https://router.huggingface.co/v1/models
 
 ```python
 node = InferenceNode(
@@ -146,7 +150,12 @@ def combine(video: str|dict, audio: str|dict) -> str:
 
 ```bash
 pip install daggr
-python workflow.py  # http://127.0.0.1:7860
+python workflow.py  # Starts web server at http://127.0.0.1:7860
+```
+
+**Troubleshooting:** Clear cache if you encounter stale state issues:
+```bash
+rm -rf ~/.cache/huggingface/daggr/*.db
 ```
 
 ## Finding Spaces (optional)
