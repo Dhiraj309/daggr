@@ -2,8 +2,26 @@ import subprocess
 import tempfile
 
 import gradio as gr
+from PIL import Image
 
 from daggr import FnNode, GradioNode, Graph
+
+
+def resize_image(image_path: str, size: int = 256) -> str:
+    """Resize and center-crop image to square dimensions (required by video API)."""
+    img = Image.open(image_path)
+    # Center crop to square
+    w, h = img.size
+    min_dim = min(w, h)
+    left = (w - min_dim) // 2
+    top = (h - min_dim) // 2
+    img = img.crop((left, top, left + min_dim, top + min_dim))
+    # Resize to target size
+    img = img.resize((size, size), Image.Resampling.LANCZOS)
+    output_path = tempfile.mktemp(suffix=".png")
+    img.save(output_path, "PNG")
+    return output_path
+
 
 prompt1 = gr.Textbox(
     label="Scene 1",
@@ -47,14 +65,11 @@ image1 = GradioNode(
     name="Image 1",
     inputs={
         "prompt": prompt1,
-        "resolution": "1024x1024 ( 1:1 )",
+        "resolution": "1280x720 ( 16:9 )",
         "steps": 8,
-        "seed": 42,
-        "shift": 3,
-        "gallery_images": [],
         "random_seed": True,
     },
-    postprocess=lambda images, seed_used, seed_number: images[0],
+    postprocess=lambda images, seed_used, seed_number: images[0]["image"],
     outputs={
         "image": gr.Image(label="Scene 1"),
     },
@@ -70,10 +85,9 @@ image2 = GradioNode(
         "steps": 8,
         "random_seed": True,
     },
+    postprocess=lambda images, seed_used, seed_number: images[0]["image"],
     outputs={
         "image": gr.Image(label="Scene 2"),
-        "seed_str": None,
-        "seed_int": None,
     },
 )
 
@@ -87,10 +101,9 @@ image3 = GradioNode(
         "steps": 8,
         "random_seed": True,
     },
+    postprocess=lambda images, seed_used, seed_number: images[0]["image"],
     outputs={
         "image": gr.Image(label="Scene 3"),
-        "seed_str": None,
-        "seed_int": None,
     },
 )
 
@@ -104,10 +117,9 @@ image4 = GradioNode(
         "steps": 8,
         "random_seed": True,
     },
+    postprocess=lambda images, seed_used, seed_number: images[0]["image"],
     outputs={
-        "image": gr.Image(label="Scene 4"),
-        "seed_str": None,
-        "seed_int": None,
+        "image": gr.Image(label="Scene 3"),
     },
 )
 
@@ -121,11 +133,42 @@ image5 = GradioNode(
         "steps": 8,
         "random_seed": True,
     },
+    postprocess=lambda images, seed_used, seed_number: images[0]["image"],
     outputs={
-        "image": gr.Image(label="Scene 5"),
-        "seed_str": None,
-        "seed_int": None,
+        "image": gr.Image(label="Scene 3"),
     },
+)
+
+# Resize images for video transition (smaller images = faster/more reliable)
+resize1 = FnNode(
+    resize_image,
+    name="Resize 1",
+    inputs={"image_path": image1.image},
+    outputs={"resized": gr.Image()},
+)
+resize2 = FnNode(
+    resize_image,
+    name="Resize 2",
+    inputs={"image_path": image2.image},
+    outputs={"resized": gr.Image()},
+)
+resize3 = FnNode(
+    resize_image,
+    name="Resize 3",
+    inputs={"image_path": image3.image},
+    outputs={"resized": gr.Image()},
+)
+resize4 = FnNode(
+    resize_image,
+    name="Resize 4",
+    inputs={"image_path": image4.image},
+    outputs={"resized": gr.Image()},
+)
+resize5 = FnNode(
+    resize_image,
+    name="Resize 5",
+    inputs={"image_path": image5.image},
+    outputs={"resized": gr.Image()},
 )
 
 transition_1_2 = GradioNode(
@@ -133,15 +176,16 @@ transition_1_2 = GradioNode(
     api_name="/generate_video",
     name="Transition 1→2",
     inputs={
-        "start_image_pil": image1.image,
-        "end_image_pil": image2.image,
+        "start_image_pil": resize1.resized,
+        "end_image_pil": resize2.resized,
         "prompt": transition_prompt,
         "negative_prompt": "blurry, distorted, low quality",
-        "duration_seconds": 2.5,
-        "steps": 20,
-        "guidance_scale": 5.0,
+        "duration_seconds": 2.0,
+        "steps": 8,
+        "guidance_scale": 1.0,
         "randomize_seed": True,
     },
+    postprocess=lambda video, seed: video,
     outputs={
         "video": gr.Video(label="Transition 1→2"),
     },
@@ -152,15 +196,16 @@ transition_2_3 = GradioNode(
     api_name="/generate_video",
     name="Transition 2→3",
     inputs={
-        "start_image_pil": image2.image,
-        "end_image_pil": image3.image,
+        "start_image_pil": resize2.resized,
+        "end_image_pil": resize3.resized,
         "prompt": transition_prompt,
         "negative_prompt": "blurry, distorted, low quality",
-        "duration_seconds": 2.5,
-        "steps": 20,
-        "guidance_scale": 5.0,
+        "duration_seconds": 2.0,
+        "steps": 8,
+        "guidance_scale": 1.0,
         "randomize_seed": True,
     },
+    postprocess=lambda video, seed: video,
     outputs={
         "video": gr.Video(label="Transition 2→3"),
     },
@@ -171,15 +216,16 @@ transition_3_4 = GradioNode(
     api_name="/generate_video",
     name="Transition 3→4",
     inputs={
-        "start_image_pil": image3.image,
-        "end_image_pil": image4.image,
+        "start_image_pil": resize3.resized,
+        "end_image_pil": resize4.resized,
         "prompt": transition_prompt,
         "negative_prompt": "blurry, distorted, low quality",
-        "duration_seconds": 2.5,
-        "steps": 20,
-        "guidance_scale": 5.0,
+        "duration_seconds": 2.0,
+        "steps": 8,
+        "guidance_scale": 1.0,
         "randomize_seed": True,
     },
+    postprocess=lambda video, seed: video,
     outputs={
         "video": gr.Video(label="Transition 3→4"),
     },
@@ -190,15 +236,16 @@ transition_4_5 = GradioNode(
     api_name="/generate_video",
     name="Transition 4→5",
     inputs={
-        "start_image_pil": image4.image,
-        "end_image_pil": image5.image,
+        "start_image_pil": resize4.resized,
+        "end_image_pil": resize5.resized,
         "prompt": transition_prompt,
         "negative_prompt": "blurry, distorted, low quality",
-        "duration_seconds": 2.5,
-        "steps": 20,
-        "guidance_scale": 5.0,
+        "duration_seconds": 2.0,
+        "steps": 8,
+        "guidance_scale": 1.0,
         "randomize_seed": True,
     },
+    postprocess=lambda video, seed: video,
     outputs={
         "video": gr.Video(label="Transition 4→5"),
     },
@@ -253,6 +300,11 @@ graph = Graph(
         image3,
         image4,
         image5,
+        resize1,
+        resize2,
+        resize3,
+        resize4,
+        resize5,
         transition_1_2,
         transition_2_3,
         transition_3_4,

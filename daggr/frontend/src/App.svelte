@@ -389,6 +389,19 @@
 				currentSheetId = data.data.sheet_id;
 			}
 			
+			if (data.data.nodes) {
+				let hasNewErrors = false;
+				for (const node of data.data.nodes) {
+					if (node.validation_error) {
+						nodeErrors[node.name] = node.validation_error;
+						hasNewErrors = true;
+					}
+				}
+				if (hasNewErrors) {
+					nodeErrors = { ...nodeErrors };
+				}
+			}
+			
 			if (data.data.persisted_results) {
 				for (const [nodeName, results] of Object.entries(data.data.persisted_results as Record<string, any[]>)) {
 					if (results && results.length > 0) {
@@ -487,6 +500,17 @@
 			
 			if (data.nodes) {
 				graphData = { ...graphData!, nodes: data.nodes, edges: data.edges || graphData!.edges };
+				
+				let hasNewErrors = false;
+				for (const node of data.nodes) {
+					if (node.validation_error) {
+						nodeErrors[node.name] = node.validation_error;
+						hasNewErrors = true;
+					}
+				}
+				if (hasNewErrors) {
+					nodeErrors = { ...nodeErrors };
+				}
 				
 				if (completedNode) {
 					const node = data.nodes?.find((n: GraphNode) => n.name === completedNode);
@@ -928,10 +952,6 @@
 		const runId = `${nodeName}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 		
 		runningNodes.add(nodeName);
-		const ancestors = getAncestors(nodeName);
-		for (const ancestor of ancestors) {
-			runningNodes.add(ancestor);
-		}
 		runningNodes = new Set(runningNodes);
 		delete nodeExecutionTimes[nodeName];
 		
