@@ -6,12 +6,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from daggr.state import get_daggr_cache_dir
+
 _client_cache: dict[str, Any] = {}
 _api_memory_cache: dict[str, dict] = {}
 _validated_set: set[str] = set()
 _model_task_cache: dict[str, str] = {}
-
-_CACHE_DIR = Path.home() / ".cache" / "huggingface" / "daggr"
 
 
 def _is_hot_reload() -> bool:
@@ -20,11 +20,11 @@ def _is_hot_reload() -> bool:
 
 def _get_cache_path(src: str) -> Path:
     src_hash = hashlib.md5(src.encode()).hexdigest()[:16]
-    return _CACHE_DIR / f"{src_hash}.json"
+    return get_daggr_cache_dir() / f"{src_hash}.json"
 
 
 def _get_validated_file() -> Path:
-    return _CACHE_DIR / "_validated.json"
+    return get_daggr_cache_dir() / "_validated.json"
 
 
 def _load_validated_set() -> None:
@@ -45,7 +45,7 @@ def _save_validated_set() -> None:
     if not _is_hot_reload():
         return
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        get_daggr_cache_dir().mkdir(parents=True, exist_ok=True)
         _get_validated_file().write_text(json.dumps(list(_validated_set)))
     except OSError:
         pass
@@ -89,7 +89,7 @@ def set_api_info(src: str, info: dict) -> None:
     if not _is_hot_reload():
         return
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        get_daggr_cache_dir().mkdir(parents=True, exist_ok=True)
         cache_path = _get_cache_path(src)
         cache_path.write_text(json.dumps(info))
     except OSError:
@@ -105,7 +105,7 @@ def set_client(src: str, client) -> None:
 
 
 def _get_model_task_cache_path() -> Path:
-    return _CACHE_DIR / "_model_tasks.json"
+    return get_daggr_cache_dir() / "_model_tasks.json"
 
 
 def _load_model_task_cache() -> None:
@@ -126,7 +126,7 @@ def _save_model_task_cache() -> None:
     if not _is_hot_reload():
         return
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        get_daggr_cache_dir().mkdir(parents=True, exist_ok=True)
         _get_model_task_cache_path().write_text(json.dumps(_model_task_cache))
     except OSError:
         pass

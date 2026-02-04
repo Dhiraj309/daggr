@@ -8,9 +8,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from huggingface_hub import constants
+
 
 def get_daggr_cache_dir() -> Path:
-    cache_dir = Path.home() / ".cache" / "huggingface" / "daggr"
+    """Get the daggr cache directory, respecting HF_HOME env var."""
+    cache_dir = Path(constants.HF_HOME) / "daggr"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
