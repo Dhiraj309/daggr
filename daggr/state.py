@@ -9,8 +9,22 @@ from pathlib import Path
 from typing import Any
 
 
+def get_hf_home() -> Path:
+    """Get the HuggingFace home directory, respecting HF_HOME env var."""
+    try:
+        from huggingface_hub import constants
+
+        return Path(constants.HF_HOME)
+    except ImportError:
+        # Fallback if huggingface_hub is not installed
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            return Path(hf_home)
+        return Path.home() / ".cache" / "huggingface"
+
+
 def get_daggr_cache_dir() -> Path:
-    cache_dir = Path.home() / ".cache" / "huggingface" / "daggr"
+    cache_dir = get_hf_home() / "daggr"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 

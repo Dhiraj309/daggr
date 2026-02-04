@@ -16,18 +16,26 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from daggr.node import GradioNode
 
-_SPACES_CACHE_DIR = Path.home() / ".cache" / "huggingface" / "daggr" / "spaces"
-_LOGS_DIR = Path.home() / ".cache" / "huggingface" / "daggr" / "logs"
+from daggr.state import get_daggr_cache_dir
+
+
+def _get_spaces_cache_dir() -> Path:
+    return get_daggr_cache_dir() / "spaces"
+
+
+def _get_logs_dir() -> Path:
+    return get_daggr_cache_dir() / "logs"
 
 _running_processes: dict[str, subprocess.Popen] = {}
 
 
 def _get_space_dir(space_id: str) -> Path:
+    spaces_dir = _get_spaces_cache_dir()
     parts = space_id.split("/")
     if len(parts) == 2:
         owner, name = parts
-        return _SPACES_CACHE_DIR / owner / name
-    return _SPACES_CACHE_DIR / space_id.replace("/", "_")
+        return spaces_dir / owner / name
+    return spaces_dir / space_id.replace("/", "_")
 
 
 def _get_metadata_path(space_dir: Path) -> Path:
@@ -419,10 +427,11 @@ class LocalSpaceManager:
         self.metadata_path.write_text(json.dumps(metadata, indent=2))
 
     def _get_log_path(self, log_type: str) -> Path:
-        _LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        logs_dir = _get_logs_dir()
+        logs_dir.mkdir(parents=True, exist_ok=True)
         safe_name = self.space_id.replace("/", "_")
         timestamp = datetime.now().strftime("%Y-%m-%d")
-        return _LOGS_DIR / f"{safe_name}_{log_type}_{timestamp}.log"
+        return logs_dir / f"{safe_name}_{log_type}_{timestamp}.log"
 
     def _log_to_file(self, log_type: str, content: str) -> None:
         log_path = self._get_log_path(log_type)
@@ -457,7 +466,7 @@ def prepare_local_node(node: GradioNode) -> None:
 
         print(f"\n  ⚠️  Local setup failed for '{node._src}'")
         print(f"  Reason: {e}")
-        print(f"  Logs: {_LOGS_DIR}/{safe_name}_*.log")
+        print(f"  Logs: {_get_logs_dir()}/{safe_name}_*.log")
 
         if no_fallback:
             raise RuntimeError(
