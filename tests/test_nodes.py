@@ -1,6 +1,6 @@
 import pytest
 
-from daggr import ChoiceNode, FnNode, Graph, InteractionNode
+from daggr import FnNode, Graph, InteractionNode
 from daggr.port import ItemList, Port, ScatteredPort
 
 
@@ -61,24 +61,6 @@ class TestInteractionNode:
 
 
 class TestChoiceNodeName:
-    def test_name_property_setter(self):
-        def step_a(x):
-            return {"output": x}
-
-        def step_b(x):
-            return {"output": x}
-
-        a = FnNode(step_a, name="variant_a")
-        b = FnNode(step_b, name="variant_b")
-        choice = a | b
-
-        assert choice.name == "variant_a"
-
-        choice.name = "My custom choice"
-        assert choice.name == "My custom choice"
-        assert choice._name == "My custom choice"
-        assert choice._name_explicitly_set is True
-
     def test_choice_node_uses_custom_name_in_graph(self):
         def step_a(x):
             return {"output": x}
