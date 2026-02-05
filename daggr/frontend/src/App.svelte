@@ -616,9 +616,11 @@
 			for (const edge of edges) {
 				if (edge.to_node === current.replace(/ /g, '_').replace(/-/g, '_')) {
 					const sourceNode = nodes.find(n => n.id === edge.from_node);
-					if (sourceNode && !sourceNode.is_input_node && !ancestors.has(sourceNode.name)) {
+					if (sourceNode && !ancestors.has(sourceNode.name)) {
 						ancestors.add(sourceNode.name);
-						toVisit.push(sourceNode.name);
+						if (!sourceNode.is_input_node) {
+							toVisit.push(sourceNode.name);
+						}
 					}
 				}
 			}
