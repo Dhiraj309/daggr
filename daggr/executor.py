@@ -727,9 +727,7 @@ class AsyncExecutor:
             return postprocess(*raw_result)
         return postprocess(raw_result)
 
-    def _extract_file_urls(
-        self, data: Any, hf_token: str | None = None
-    ) -> Any:
+    def _extract_file_urls(self, data: Any, hf_token: str | None = None) -> Any:
         from gradio_client.utils import is_file_obj_with_meta, traverse
 
         def download_and_wrap(file_obj: dict) -> FileValue:
