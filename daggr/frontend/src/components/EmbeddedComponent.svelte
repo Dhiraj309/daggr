@@ -93,6 +93,8 @@
 			label={comp.props?.label || comp.port_name}
 			value={value}
 			open={comp.props?.open ?? 2}
+			editable={isInputNode}
+			onchange={(v) => onchange?.(comp.port_name, v)}
 		/>
 	{:else if comp.component === 'audio'}
 		<Audio

@@ -12,6 +12,7 @@ trackio.db
 *.daggr_sessions.db
 node_modules/
 /dist/
+examples/test.py
 daggr/frontend/dist/
 build/
 tf_test_run/
