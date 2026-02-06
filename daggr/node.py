@@ -19,6 +19,35 @@ from typing import Any
 from daggr._utils import suggest_similar
 from daggr.port import ItemList, Port, PortNamespace, is_port
 
+_FILE_TYPE_COMPONENTS = {
+    "Image",
+    "Audio",
+    "Video",
+    "File",
+    "Gallery",
+    "ImageEditor",
+    "ImageSlider",
+}
+
+
+def _warn_if_type_set(component: Any, port_name: str) -> None:
+    constructor_args = getattr(component, "_constructor_args", None)
+    if not constructor_args:
+        return
+    comp_type = constructor_args[0].get("type")
+    if comp_type is None:
+        return
+    class_name = type(component).__name__
+    if class_name not in _FILE_TYPE_COMPONENTS:
+        return
+    if comp_type != "filepath":
+        warnings.warn(
+            f"Gradio component {class_name}(type={comp_type!r}) on port '{port_name}': "
+            f"daggr ignores the `type` parameter. All file data is passed as file path "
+            f"strings regardless of this setting.",
+            stacklevel=4,
+        )
+
 
 def _is_gradio_component(obj: Any) -> bool:
     if obj is None:
@@ -137,6 +166,7 @@ class Node(ABC):
             if is_port(value):
                 self._port_connections[port_name] = value
             elif _is_gradio_component(value):
+                _warn_if_type_set(value, port_name)
                 self._input_components[port_name] = value
             else:
                 self._fixed_inputs[port_name] = value
@@ -145,6 +175,7 @@ class Node(ABC):
         for port_name, component in outputs.items():
             self._output_ports.append(port_name)
             if component is not None and _is_gradio_component(component):
+                _warn_if_type_set(component, port_name)
                 self._output_components[port_name] = component
 
     def test(self, **inputs) -> dict[str, Any]:
