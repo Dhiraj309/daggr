@@ -6,9 +6,11 @@ executed to process data through a pipeline.
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import sys
+import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +18,8 @@ import networkx as nx
 
 from daggr._utils import suggest_similar
 from daggr.edge import Edge
-from daggr.node import Node
+from daggr.local_space import prepare_local_node
+from daggr.node import ChoiceNode, GradioNode, InferenceNode, Node
 from daggr.port import Port
 
 if TYPE_CHECKING:
@@ -35,8 +38,6 @@ def _parse_space_id(src: str) -> str | None:
 
 
 def _get_dependency_id(node) -> tuple[str | None, str]:
-    from daggr.node import GradioNode, InferenceNode
-
     if isinstance(node, GradioNode):
         space_id = _parse_space_id(node._src)
         return space_id, "space"
@@ -192,6 +193,54 @@ def _get_hf_username() -> str | None:
         return None
 
 
+class _Spinner:
+    _CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message: str):
+        self._message = message
+        self._is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        if self._is_tty:
+            self._stop = threading.Event()
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+
+    def _spin(self):
+        frames = itertools.cycle(self._CHARS)
+        while not self._stop.is_set():
+            sys.stdout.write(f"\r  {next(frames)} {self._message}")
+            sys.stdout.flush()
+            self._stop.wait(0.08)
+
+    def _finish(self, symbol: str, suffix: str = ""):
+        line = f"  {symbol} {self._message}"
+        if suffix:
+            line += f" — {suffix}"
+        if self._is_tty:
+            self._stop.set()
+            self._thread.join()
+            sys.stdout.write(f"\r{line}\033[K\n")
+        else:
+            sys.stdout.write(f"{line}\n")
+        sys.stdout.flush()
+
+    def succeed(self, suffix: str = ""):
+        self._finish("✓", suffix)
+
+    def warn(self, suffix: str = ""):
+        self._finish("⚠", suffix)
+
+
+def _get_node_display_label(node) -> str:
+    if isinstance(node, GradioNode):
+        label = node._src
+        if node._api_name:
+            label += f" ({node._api_name})"
+        return label
+    elif isinstance(node, InferenceNode):
+        return node._model_name_for_hub
+    return node._name
+
+
 class Graph:
     """A directed acyclic graph (DAG) of nodes for data processing.
 
@@ -237,8 +286,6 @@ class Graph:
         elif persist_key:
             self.persist_key = persist_key
         else:
-            import re
-
             self.persist_key = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
         self.nodes: dict[str, Node] = {}
         self._nx_graph = nx.DiGraph()
@@ -406,8 +453,6 @@ class Graph:
                 default theme.
             **kwargs: Additional arguments passed to uvicorn.
         """
-        import os
-
         from daggr.server import DaggrServer
 
         if host is None:
@@ -415,17 +460,13 @@ class Graph:
         if port is None:
             port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
 
-        self._prepare_local_nodes()
-        self._check_dependency_hashes()
+        self._startup_display()
         server = DaggrServer(self, theme=theme)
         server.run(
             host=host, port=port, share=share, open_browser=open_browser, **kwargs
         )
 
     def _prepare_local_nodes(self) -> None:
-        from daggr.local_space import prepare_local_node
-        from daggr.node import ChoiceNode, GradioNode
-
         for node in self.nodes.values():
             if isinstance(node, ChoiceNode):
                 for variant in node._variants:
@@ -440,7 +481,6 @@ class Graph:
             return
 
         from daggr import _client_cache
-        from daggr.node import ChoiceNode, GradioNode, InferenceNode
 
         nodes_to_check: list[GradioNode | InferenceNode] = []
         for node in self.nodes.values():
@@ -504,6 +544,112 @@ class Graph:
 
         _prompt_dependency_changes(changed)
 
+    def _startup_display(self) -> None:
+        mode = os.environ.get("DAGGR_DEPENDENCY_CHECK", "").lower()
+        skip_hashes = mode == "skip"
+
+        node_count = len(self.nodes)
+        noun = "node" if node_count == 1 else "nodes"
+        print(f"\n  Launching Daggr ({self.name}) with {node_count} {noun}:\n")
+
+        from daggr import _client_cache
+
+        changed: list[dict[str, Any]] = []
+
+        def _check_hash(node):
+            dep_id, dep_type = _get_dependency_id(node)
+            if dep_id is None:
+                return None
+
+            current_sha = _fetch_current_sha(dep_id, dep_type)
+            if current_sha is None:
+                return None
+
+            cached_sha = _client_cache.get_dependency_hash(dep_id)
+            if cached_sha is None:
+                _client_cache.set_dependency_hash(dep_id, current_sha)
+                return ("recorded", f"hash {current_sha[:7]} recorded")
+            elif cached_sha == current_sha:
+                return ("matches", "hash matches")
+            else:
+                changed.append(
+                    {
+                        "type": dep_type,
+                        "id": dep_id,
+                        "node": node,
+                        "cached_sha": cached_sha,
+                        "current_sha": current_sha,
+                    }
+                )
+                return ("changed", "hash changed")
+
+        for node in self.nodes.values():
+            if isinstance(node, ChoiceNode):
+                spinner = _Spinner(node._name)
+                for variant in node._variants:
+                    if isinstance(variant, GradioNode) and variant._run_locally:
+                        prepare_local_node(variant)
+                results = []
+                if not skip_hashes:
+                    for variant in node._variants:
+                        if isinstance(variant, (GradioNode, InferenceNode)):
+                            result = _check_hash(variant)
+                            if result:
+                                results.append(result)
+                if any(r[0] == "changed" for r in results):
+                    spinner.warn("hash changed")
+                elif results:
+                    spinner.succeed(results[-1][1])
+                else:
+                    spinner.succeed()
+                continue
+
+            if isinstance(node, GradioNode) and node._run_locally:
+                prepare_local_node(node)
+
+            label = _get_node_display_label(node)
+
+            if isinstance(node, (GradioNode, InferenceNode)) and not skip_hashes:
+                spinner = _Spinner(label)
+                result = _check_hash(node)
+                if result and result[0] == "changed":
+                    spinner.warn(result[1])
+                elif result:
+                    spinner.succeed(result[1])
+                else:
+                    spinner.succeed()
+            else:
+                sys.stdout.write(f"  ✓ {label}\n")
+                sys.stdout.flush()
+
+        print()
+
+        if not changed:
+            return
+
+        if mode == "update":
+            for item in changed:
+                _client_cache.set_dependency_hash(item["id"], item["current_sha"])
+                print(
+                    f"  [daggr] Auto-updated hash for {item['type']} "
+                    f"'{item['id']}' → {item['current_sha'][:12]}"
+                )
+            return
+
+        if mode == "error":
+            descs = [
+                f"  • {item['type']} '{item['id']}': "
+                f"{item['cached_sha'][:12]} → {item['current_sha'][:12]}"
+                for item in changed
+            ]
+            raise RuntimeError(
+                "Upstream dependencies have changed:\n"
+                + "\n".join(descs)
+                + "\nSet DAGGR_DEPENDENCY_CHECK=update to accept changes."
+            )
+
+        _prompt_dependency_changes(changed)
+
     def get_subgraphs(self) -> list[set[str]]:
         """Get all weakly connected components of the graph.
 
@@ -530,8 +676,6 @@ class Graph:
           - inputs: list of {node, port, type, component} for each input
           - outputs: list of {node, port, type, component} for each output
         """
-        from daggr.node import ChoiceNode
-
         subgraphs = self.get_subgraphs()
         output_nodes = set(self.get_output_nodes())
         result = {"subgraphs": []}
